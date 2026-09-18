@@ -1,25 +1,19 @@
-defaults:
-  - problem_trafos: default
-  - diffmodels: default_dense
-  - reconstruction: default_variational_diff
-  - representation: identity
-  - sample_logger: with_target
-  - cluster: default
+task_runner: ray_local
+cluster_name: ???
 
-descr_short: ???
-note: ???
-
-cuda_devices:
-  update_enabled: False
-  min_gpu : 80
-  min_mem : 20000
-  rep: 5
-  wait_time: 0.1
-  
 wandb:
   log: False
   log_artifact: True
   project: ???
   entity: ???
   code_dir: ./
-  group_name: ${hydra:runtime.choices.exps}
+
+cluster_hierarchy:
+  cluster:
+    - node
+
+local_cache_path:
+  node: ???
+
+bart_path:
+  node: /mnt/mri_libs/bart-0.6.00

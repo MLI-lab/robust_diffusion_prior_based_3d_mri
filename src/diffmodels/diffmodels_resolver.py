@@ -1,5 +1,3 @@
-from typing import Callable, Dict
-from collections import OrderedDict
 
 import torch
 import logging
@@ -9,8 +7,6 @@ from .ema import ExponentialMovingAverage
 
 # from src.utils.path_utils import get_path_by_cluster_name
 
-from pathlib import Path
-from omegaconf import OmegaConf
 
 
 def create_dense_model(
@@ -80,75 +76,15 @@ def create_model(name: str, params, arch_cfg = None) -> UNetModel:
     else:
         raise ValueError(f"Unknown model name {name}")
 
-def load_score_model(cfg: Dict, device : str, path_resolver : Callable) -> UNetModel:
-
-    model_key, model_use_ema = cfg.model_key, cfg.model_use_ema
-    # if there is a correct path available for loading the model, then load the pretrained model (otherwise load the randomly initalized one)
-    if (model_use_ema and cfg.load_ema_params_from_path is not None) or (not model_use_ema and cfg.load_params_from_path is not None):
-        
-        score = None # will be loaded later
-        assert model_key is not None, "model_key is not defined in the config file"
-
-        if not model_use_ema:
-            # first resolve the path to the model
-            assert model_key in cfg.load_params_from_path, f"model_key {model_key} not found in load_ema_params_from_path"
-            load_params_from_path = path_resolver(cfg.load_params_from_path[model_key])
-
-            # the path points to the concrete model, before loading the model try accessing the arch
-            hydra_train_config = Path(load_params_from_path).parent.joinpath('.hydra', 'config.yaml')
-            kwargs_score = dict(OmegaConf.load(hydra_train_config).arch)
-            # load the model (backward compatibility)
-            if "name" not in kwargs_score:
-                param_dict = {
-                    "name" : "dense",
-                    "params" : kwargs_score
-                }
-            else:
-                param_dict = kwargs_score
-            score = create_model(**param_dict, arch_cfg=cfg).to(device)
-
-            try: 
-                score.load_state_dict(
-                    torch.load(load_params_from_path, map_location=device)
-                )
-            except: 
-                state_dict = torch.load(load_params_from_path, map_location=device)
-                new_state_dict = OrderedDict()
-                for k, v in state_dict.items():
-                    new_state_dict[k.replace('module.', '')] = v # remove 'module.' of DataParallel/DistributedDataParallel
-                score.load_state_dict(new_state_dict)
-            logging.info(f'model ckpt loaded from: {load_params_from_path}')
-
-        else:
-            assert model_key in cfg.load_ema_params_from_path, f"model_key {model_key} not found in load_params_from_path"
-            load_ema_params_from_path = path_resolver(cfg.load_ema_params_from_path[model_key])
-
-            # the path points to the concrete model, before loading the model try accessing the arch
-            hydra_train_config = Path(load_ema_params_from_path).parent.joinpath('.hydra', 'config.yaml')
-            try:
-                kwargs_score = dict(OmegaConf.load(hydra_train_config).arch)
-            except:
-                kwargs_score = dict(OmegaConf.load(hydra_train_config).diffmodels.arch)
-            # load the model (backward compatibility)
-            if "name" not in kwargs_score:
-                param_dict = {
-                    "name" : "dense",
-                    "params" : kwargs_score
-                }
-            else:
-                param_dict = kwargs_score
-            score = create_model(**param_dict, arch_cfg = cfg.arch if "arch" in cfg else None).to(device)
-
-            ema = ExponentialMovingAverage(score.parameters(), decay=0.999)
-            ema.load_state_dict(torch.load(load_ema_params_from_path, map_location=device))
-            ema.copy_to(score.parameters())
-            logging.info(f'model ema ckpt loaded from: {load_ema_params_from_path}')
-
+def load_score_model(score_model, model_use_ema : bool):
+    model_path = "model.pt" if not model_use_ema else "ema_model.pt" # see utils_save
+    if model_use_ema:
+        ema = ExponentialMovingAverage(score_model.parameters(), decay=0.999)
+        ema.load_state_dict(torch.load(model_path, map_location='cpu'))
+        ema.copy_to(score_model.parameters())
+        logging.info(f'model ema ckpt loaded from: {model_path}')
     else:
-        logging.info("Creating model from scratch.")
-        kwargs_score = dict(cfg.arch)
-        score = create_model(**kwargs_score, arch_cfg=None).to(device)
-
-    #score.dtype = torch.float32
-
-    return score
+        score_model.load_state_dict(
+            torch.load(model_path, map_location='cpu')
+        )
+        logging.info(f'model ckpt loaded from: {model_path}')

@@ -34,23 +34,7 @@ class BaseFwdTrafo(nn.Module, ABC):
         raise NotImplementedError
 
     def fbp(self, observation: Tensor) -> Tensor:
-        """
-        Apply a filtered back-projection.
-
-        Parameters
-        ----------
-        observation : :class:`torch.Tensor`
-            Projection values.
-            Shape for 2D geometries: ``(batch, channels, angles, det_cols)``.
-            Shape for 3D geometries: ``(batch, channels, det_rows, angles, det_cols)``.
-
-        Returns
-        -------
-        x : :class:`torch.Tensor`
-            Filtered back-projection.
-            Shape for 2D geometries: ``(batch, channels, im_0, im_1)``.
-            Shape for 3D geometries: ``(batch, channels, im_0, im_1, im_2)``.
-        """
+        """Apply a filtered back-projection."""
         raise NotImplementedError
 
     def forward(self, x: Tensor) -> Tensor:

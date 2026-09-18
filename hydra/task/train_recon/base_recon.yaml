@@ -1,0 +1,13 @@
+defaults:
+  - problem_trafos: default
+  - reconstruction: default_variational_diff
+  - representation: identity
+  - sample_logger: with_target
+
+seed: 1
+sample_idx: 0
+
+storage_settings:
+  is_remote: true
+  bucket_or_base_path: resrob-recon
+  storage_name: resrob-recon

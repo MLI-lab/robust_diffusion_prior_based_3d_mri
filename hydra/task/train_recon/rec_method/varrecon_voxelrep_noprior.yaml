@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /representation: identity
+  - override /reconstruction: default_variational_nodiff
+  - override /sample_logger: with_target
+  
+reconstruction:
+  variational:
+    fitting:
+      optimizer:
+        lr: 2.0
+        iterations: 200
+
+sweep: {}

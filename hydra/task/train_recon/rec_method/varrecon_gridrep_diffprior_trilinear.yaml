@@ -1,0 +1,27 @@
+# @package _global_
+defaults:
+  - override /representation: grid_sampled
+  - override /reconstruction: default_variational_diff
+  - override /sample_logger: with_target
+
+diffmodels:
+  use_ema: true
+  model_from_epoch: -1
+
+representation:
+  mesh_prior_scale_factor: 1.0
+  interpolation_mode: 'bilinear'
+
+reconstruction:
+  variational:
+    fitting:
+      optimizer:
+        lr: 2.0
+        iterations: 200
+    regularization:
+      loss_cfg:
+        reg_strength: 0.01
+
+sweep:
+  ++reconstruction.variational.regularization.loss_cfg.reg_strength: [1e1, 1e-4]
+  # ++reconstruction.variational.fitting.optimizer.lr: [8.0, 0.25]

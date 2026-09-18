@@ -4,11 +4,7 @@ import random
 
 class BatchSamplerSameShape(Sampler):
     r"""Yield a mini-batch of indices. The sampler will drop the last batch of
-            an image size bin if it is not equal to ``batch_size``
-
-    Args:
-        examples (dict): List from dataset class.
-        batch_size (int): Size of mini-batch.
+    an image size bin if it is not equal to ``batch_size``
     """
 
     def __init__(self, dataset, batch_size, indices=None,
@@ -28,6 +24,7 @@ class BatchSamplerSameShape(Sampler):
             #item = dataset.raw_samples[idx]
             try:
                 # for fastMRI datasets this is more efficient
+                
                 item = dataset.raw_samples[idx]
                 if group_shape_by == 'target':
                     shape = item.metadata['target_shape']

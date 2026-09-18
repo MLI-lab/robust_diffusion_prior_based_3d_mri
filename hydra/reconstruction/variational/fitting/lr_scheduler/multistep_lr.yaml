@@ -1,8 +1,0 @@
-defaults:
-  - base
-
-name: 'MultiStepLR'
-
-verbose: True
-milestones: [20]
-gamma: 0.1

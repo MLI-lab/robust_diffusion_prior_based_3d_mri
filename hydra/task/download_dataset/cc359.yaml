@@ -1,0 +1,20 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: cc359
+
+raw_subfolder: cc359
+
+download:
+  mode: datalad_zip
+  exists_ok: true
+  source: https://github.com/conpdatasets/calgary-campinas.git
+  dataset_subfolder: cc359
+  zip_relpath: CC359/Raw-data/Multi-channel/12-channel/train_val_12_channel.zip
+  fallback_url: https://sftp.conp.ca/users/calgary-campinas/CC359/Raw-data/Multi-channel/12-channel/train_val_12_channel.zip
+  fallback_parallel_connections: 8
+  skip_datalad_get: true
+  timeout: 120
+  lock_timeout: 7200
+  remove_archive: false

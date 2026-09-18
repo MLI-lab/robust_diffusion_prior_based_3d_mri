@@ -1,0 +1,4 @@
+defaults:
+  - ddim_iscs
+
+sampling_in_3d: true

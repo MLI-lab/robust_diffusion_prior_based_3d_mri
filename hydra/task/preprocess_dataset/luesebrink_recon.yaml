@@ -1,0 +1,28 @@
+defaults:
+  - base_recon
+  - _self_
+
+input:
+  data_path_recon: null
+  data_path_sensmaps_recon: null
+
+dataset:
+  apply_fft1c_on_readout_dim: True
+  apply_fft1c_on_readout_dim_shifts: [True, True]
+  readout_dim: 0
+  readout_dim_keep_spatial: False
+  dataset_is_3d: True
+
+preprocess:
+  sampling_kind: cartesian
+  mask_type: Poisson2D
+  mask_accelerations: 6.0
+  mask_seed: 1234
+  mask_calib: null
+  target_type: rss
+  source_recons_key: reconstruction_rss
+  source_sensmaps_key: null
+  output_recons_key: reconstruction_rss
+  output_sensmaps_key: null
+  sensmap_mode: source
+  volume_filter: ".*\\.h5"

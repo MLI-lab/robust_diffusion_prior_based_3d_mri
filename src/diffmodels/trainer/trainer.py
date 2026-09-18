@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+import logging
 
 import torch
 
@@ -10,7 +11,8 @@ import wandb
 
 from src.utils.wandb_utils import tensor_to_wandbimages_dict
 
-from .loss import epsilon_based_loss_fn
+#from .loss import epsilon_based_loss_fn
+from .loss import loss_fn_resolver
 from ..sde import SDE
 from ..utils_save import save_model
 
@@ -27,17 +29,20 @@ def score_model_trainer(
     score: UNetModel,
     sde: SDE,
     dataloader_train: DataLoader,
-    dataloader_val: DataLoader,
+    dataloader_val: Optional[DataLoader],
     optim_kwargs: Dict,
     val_kwargs: Dict,
     prior_trafo: BasePriorTrafo,
     sampler : BaseSampler,
     sample_logger : BaseSampleLogger,
-    device: Optional[Any] = None
+    switch_dir_and_upload_directory_on_exit_mgr,
+    device: Optional[Any] = None,
     ):
     
     optimizer = Adam(score.parameters(), lr=optim_kwargs['lr'])
-    loss_fn = epsilon_based_loss_fn 
+    #loss_fn = epsilon_based_loss_fn 
+    loss_fn_train = loss_fn_resolver(**optim_kwargs['loss_fn'])
+    loss_fn_val = loss_fn_resolver(**val_kwargs['loss_fn']) if dataloader_val is not None else None
 
     ema = None
     if optim_kwargs.use_ema: 
@@ -86,96 +91,162 @@ def score_model_trainer(
             'sample_norm_std': samples_norm.std(),
             })
 
-    sample_logger.init_run()
+    
+    with switch_dir_and_upload_directory_on_exit_mgr(new_subfolder="training_run"):
+        sample_logger.init_run()
 
     grad_step = 0
-    for epoch in range(optim_kwargs['epochs']):
-        avg_loss, num_items = 0, 0
-        with tqdm(enumerate(dataloader_train), total=len(dataloader_train)) as pbar:
+    steps_per_epoch = max(len(dataloader_train), 1)
+    epochs_cfg = int(optim_kwargs.get('epochs', 1))
+
+    training_steps_cfg = optim_kwargs.get('training_steps', None)
+    if training_steps_cfg is None:
+        max_steps = epochs_cfg * steps_per_epoch
+    else:
+        max_steps = int(training_steps_cfg)
+
+    n_log_total = int(optim_kwargs.get('n_log_total', 10))
+    log_every_n_steps = max(max_steps // n_log_total, 1)
+
+    n_save_total = int(optim_kwargs.get('n_save_total', 10))
+    save_every_n_steps = max(max_steps // n_save_total, 1)
+
+    n_eval_total = int(val_kwargs.get('n_eval_total', 10))
+    eval_every_n_steps = max(max_steps // n_eval_total, 1)
+
+    n_sample_total = int(val_kwargs.get('n_sample_total', 10))
+    sample_every_n_steps = max(max_steps // n_sample_total, 1)
+
+    train_iter = iter(dataloader_train)
+    running_loss = 0.0
+    running_items = 0
+    _shape_logged = False
+    gradient_accumulation_steps = max(int(optim_kwargs.get('gradient_accumulation_steps', 1)), 1)
+
+    def eval_on_validation_set(model):
+        if dataloader_val is None or loss_fn_val is None:
+            return None
+        with torch.no_grad():
+            model.eval()
+            val_loss = 0.0
+            val_num_items = 0
+            num_max_items = 1000 # todo: make configurable
+            for x in dataloader_val:
+                x = x.to(device)
+                x = prior_trafo(x)
+                loss = loss_fn_val(
+                    x=x,
+                    model=model,
+                    sde=sde
+                )
+                val_loss += loss.item() * x.shape[0]
+                val_num_items += x.shape[0]
+                if val_num_items >= num_max_items:
+                    break
+            return val_loss / max(val_num_items, 1)
+
+    with tqdm(total=max_steps, desc="train_steps") as pbar:
+        while grad_step < max_steps:
             score.train()
-            for cntr, x in pbar:
+            optimizer.zero_grad()
+            latest_loss_value = None
+            for _ in range(gradient_accumulation_steps):
+                try:
+                    x = next(train_iter)
+                except StopIteration:
+                    train_iter = iter(dataloader_train)
+                    x = next(train_iter)
 
                 x = x.to(device)
-
+                if not _shape_logged:
+                    logging.info("train batch incoming shape: %s", tuple(x.shape))
                 x = prior_trafo(x)
+                if not _shape_logged:
+                    logging.info("train batch after prior_trafo shape: %s", tuple(x.shape))
+                    _shape_logged = True
 
-                loss = loss_fn(
+                loss = loss_fn_train(
                     x=x,
                     model=score,
                     sde=sde
-                    )
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                pbar.set_description(
-                    f'losss={loss.item():.1f}',
-                    refresh=False
                 )
-                
-                grad_step += 1
-                avg_loss += loss.item() * x.shape[0]
-                num_items += x.shape[0]
 
-            should_save_model = (
-                epoch % optim_kwargs['save_model_every_n_epoch'] == 0 or epoch == optim_kwargs['epochs'] - 1)
-            
-            if should_save_model:
-                save_model(score=score, epoch=epoch, optim_kwargs=optim_kwargs, ema=ema)
-            
-            if optim_kwargs.use_ema and (
-                grad_step > optim_kwargs['ema_warm_start_steps'] or epoch > 0):
+                latest_loss_value = loss.item()
+                running_loss += latest_loss_value * x.shape[0]
+                running_items += x.shape[0]
+                (loss / gradient_accumulation_steps).backward()
+
+            optimizer.step()
+
+            grad_step += 1
+            pbar.update(1)
+            if latest_loss_value is not None:
+                pbar.set_description(f"loss={latest_loss_value:.3f}", refresh=False)
+
+            if optim_kwargs.use_ema and grad_step > int(optim_kwargs['ema_warm_start_steps']):
                 ema.update(score.parameters())
 
-            def eval_on_validation_set(model):
-                with torch.no_grad():
-                    model.eval()
-                    val_loss = 0
-                    val_num_items = 0
-                    for x in dataloader_val:
-                        x = x.to(device)
-                        x = prior_trafo(x)
-                        loss = loss_fn(
-                            x=x,
-                            model=score,
-                            sde=sde
-                        )
-                        val_loss += loss.item() * x.shape[0]
-                        val_num_items += x.shape[0]
-                    return val_loss / val_num_items
+            should_log = (grad_step % log_every_n_steps == 0) or (grad_step == max_steps)
+            if should_log and wandb.run is not None:
+                wandb.log({
+                    'train_loss': running_loss / max(running_items, 1),
+                    'global_step': grad_step,
+                    'step': grad_step,
+                    'epoch_equivalent': grad_step / steps_per_epoch,
+                })
+                running_loss = 0.0
+                running_items = 0
 
-            val_loss = eval_on_validation_set(score)
-                        
-            wandb.log(
-                {'loss': avg_loss / num_items, 'val_loss' : val_loss,  'epoch': epoch + 1, 'step': epoch + 1}
-            )
+            should_eval = (grad_step % eval_every_n_steps == 0) or (grad_step == max_steps)
+            if should_eval and dataloader_val is not None:
+                val_loss = eval_on_validation_set(score)
+                if val_loss is not None and wandb.run is not None:
+                    wandb.log({
+                        'val_loss': val_loss,
+                        'global_step': grad_step,
+                        'step': grad_step,
+                        'epoch_equivalent': grad_step / steps_per_epoch,
+                    })
 
-            if val_kwargs.sample_freq is not None:
-                if epoch % val_kwargs.sample_freq == 0:
-                    if optim_kwargs.use_ema:
-                        ema.store(score.parameters())
-                        ema.copy_to(score.parameters())
-                        score = score.to(device)
-                    score.eval()
-                    
-                    sample_logger.init_sample_log(sample_nr = epoch, mesh = None) # fixed grid ignores mesh
+            should_sample = (grad_step % sample_every_n_steps == 0) or (grad_step == max_steps)
+            if should_sample:
+                if optim_kwargs.use_ema:
+                    ema.store(score.parameters())
+                    ema.copy_to(score.parameters())
+                    score = score.to(device)
+                score.eval()
 
-                    sample = sampler.sample()
+                # Release fragmented reserved-but-unallocated CUDA memory before
+                # sampling so the UNet forward passes have enough contiguous space.
+                torch.cuda.empty_cache()
 
-                    representation = FixedGridRepresentation(in_shape=tuple(sample.shape[:-1]), out_features=sample.shape[-1], warm_start=sample)
-                    sample_logger.close_sample_log(representation=representation)
+                sample_logger.init_sample_log(sample_nr=grad_step, mesh=None)
+                sample = sampler.sample()
+                representation = FixedGridRepresentation(
+                    in_shape=tuple(sample.shape[:-1]), out_features=sample.shape[-1], warm_start=sample
+                )
+                sample_logger.close_sample_log(representation=representation)
 
-                    val_loss_ema = eval_on_validation_set(score)
+                val_loss_ema = eval_on_validation_set(score)
+                if wandb.run is not None:
+                    log_payload = {
+                        'sample_mean': sample.mean(),
+                        'sample_std': sample.std(),
+                        'global_step': grad_step,
+                        'step': grad_step,
+                    }
+                    if val_loss_ema is not None:
+                        log_payload['val_loss_ema'] = val_loss_ema
+                    wandb.log(log_payload)
 
-                    if wandb.run is not None:
-                        wandb.run.log({
-                            'sample_mean': sample.mean(),
-                            'sample_std': sample.std(),
-                            "val_loss_ema": val_loss_ema
-                            })
+                if optim_kwargs.use_ema:
+                    ema.restore(score.parameters())
 
-                    if optim_kwargs.use_ema: ema.restore(score.parameters())
+            should_save_model = (grad_step % save_every_n_steps == 0) or (grad_step == max_steps)
+            if should_save_model:
+                with switch_dir_and_upload_directory_on_exit_mgr(new_subfolder=f"step_{grad_step}"):
+                    save_model(score=score, epoch=grad_step, optim_kwargs=optim_kwargs, ema=ema)
 
-    torch.save(score.state_dict(), 'last_model.pt')
-
-    sample_logger.close_run()
+    with switch_dir_and_upload_directory_on_exit_mgr(new_subfolder="final_model"):
+        save_model(score=score, epoch=max_steps, optim_kwargs=optim_kwargs, ema=ema)
+        sample_logger.close_run()

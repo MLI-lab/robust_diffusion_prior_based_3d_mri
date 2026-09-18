@@ -1,0 +1,11 @@
+defaults:
+  - base
+
+name: dds_tv
+gamma: 1.0
+alpha: 0.0
+rho: 10.0
+lamb : 0.04
+cg_max_iter: 4
+cg_max_tridiag_iter : 4
+admm_iters: 1

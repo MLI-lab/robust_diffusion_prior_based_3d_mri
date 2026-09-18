@@ -3,12 +3,7 @@ from typing import Optional, List
 
 
 def fft3c(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
-    """
-    Apply centered 3 dimensional Fast Fourier Transform.
-
-    Returns:
-        The FFT of the input.
-    """
+    """Apply centered 3 dimensional Fast Fourier Transform."""
     if not data.shape[-1] == 2:
         raise ValueError("Tensor does not have separate complex dim.")
 
@@ -22,14 +17,8 @@ def fft3c(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
 
     return data
 
-
 def ifft3c(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
-    """
-    Apply centered 3-dimensional Inverse Fast Fourier Transform.
-
-    Returns:
-        The IFFT of the input.
-    """
+    """Apply centered 3-dimensional Inverse Fast Fourier Transform."""
     if not data.shape[-1] == 2:
         raise ValueError("Tensor does not have separate complex dim.")
 
@@ -44,17 +33,7 @@ def ifft3c(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
     return data
 
 def roll_one_dim(x: torch.Tensor, shift: int, dim: int) -> torch.Tensor:
-    """
-    Similar to roll but for only one dim.
-
-    Args:
-        x: A PyTorch tensor.
-        shift: Amount to roll.
-        dim: Which dimension to roll.
-
-    Returns:
-        Rolled version of x.
-    """
+    """Similar to roll but for only one dim."""
     shift = shift % x.size(dim)
     if shift == 0:
         return x
@@ -70,17 +49,7 @@ def roll(
     shift: List[int],
     dim: List[int],
 ) -> torch.Tensor:
-    """
-    Similar to np.roll but applies to PyTorch Tensors.
-
-    Args:
-        x: A PyTorch tensor.
-        shift: Amount to roll.
-        dim: Which dimension to roll.
-
-    Returns:
-        Rolled version of x.
-    """
+    """Similar to np.roll but applies to PyTorch Tensors."""
     if len(shift) != len(dim):
         raise ValueError("len(shift) must match len(dim)")
 
@@ -91,16 +60,7 @@ def roll(
 
 
 def fftshift(x: torch.Tensor, dim: Optional[List[int]] = None) -> torch.Tensor:
-    """
-    Similar to np.fft.fftshift but applies to PyTorch Tensors
-
-    Args:
-        x: A PyTorch tensor.
-        dim: Which dimension to fftshift.
-
-    Returns:
-        fftshifted version of x.
-    """
+    """Similar to np.fft.fftshift but applies to PyTorch Tensors"""
     if dim is None:
         # this weird code is necessary for toch.jit.script typing
         dim = [0] * (x.dim())
@@ -116,16 +76,7 @@ def fftshift(x: torch.Tensor, dim: Optional[List[int]] = None) -> torch.Tensor:
 
 
 def ifftshift(x: torch.Tensor, dim: Optional[List[int]] = None) -> torch.Tensor:
-    """
-    Similar to np.fft.ifftshift but applies to PyTorch Tensors
-
-    Args:
-        x: A PyTorch tensor.
-        dim: Which dimension to ifftshift.
-
-    Returns:
-        ifftshifted version of x.
-    """
+    """Similar to np.fft.ifftshift but applies to PyTorch Tensors"""
     if dim is None:
         # this weird code is necessary for toch.jit.script typing
         dim = [0] * (x.dim())

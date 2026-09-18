@@ -1,0 +1,47 @@
+mode: recon_observation
+
+input:
+  data_path_recon: null
+  data_path_sensmaps_recon: null
+
+output_cache_subfolder: preprocess_cache
+
+
+dataset:
+  apply_fft1c_on_readout_dim: False
+  apply_fft1c_on_readout_dim_shifts: [True, True]
+  readout_dim: 0
+  readout_dim_keep_spatial: False
+  dataset_is_3d: True
+
+preprocess:
+  version: v1
+  sampling_kind: cartesian
+  exists_ok: True
+  volume_filter: ".*\\.h5"
+  volume_limit: null
+  source_recons_key: reconstruction_mvue
+  source_sensmaps_key: sensitivity_maps
+  output_recons_key: reconstruction_mvue
+  output_pseudoinverse_key: pseudoinverse
+  output_sensmaps_key: sens_maps
+  target_type: fullysampled_rec
+  scale_target_by_kspacenorm: False
+  target_scaling_factor: 1.0
+  observation_scaling_mode: default
+  observation_scaling_constant: 1.0
+  target_interpolate_by_factor: 1.0
+  target_interpolation_method: fourier
+  mask_enabled: True
+  mask_type: Poisson2D
+  mask_accelerations: 4.0
+  mask_calib: [24, 24]
+  ecalib_calib_size: null
+  coil_compression_virtual_coils: null
+  mask_seed: 1234
+  sensmap_mode: bart_from_observed
+
+  visualize:
+    enabled: true
+    num_volumes: 1
+    keys: null

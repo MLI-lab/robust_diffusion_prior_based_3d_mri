@@ -1,0 +1,27 @@
+defaults:
+  - base
+  - arch: dense_4.1M
+  - sde: default
+  - sampler: ddim
+
+train:
+  cache_dataset: True
+  cache_dataset_in_gpu: True
+  cache_dataset_store_on_disk: True
+  cache_dataset_load_from_disk: True
+  cache_dataset_disk_path: train_cache
+  cache_dataset_repeats: 1
+
+  loss_fn:
+    name: epsilon_based_loss_fn
+
+val:
+  cache_dataset: True
+  cache_dataset_in_gpu: True
+  cache_dataset_store_on_disk: True
+  cache_dataset_load_from_disk: True
+  cache_dataset_disk_path: val_cache
+  cache_dataset_repeats: 1
+
+  loss_fn:
+    name: epsilon_based_loss_fn

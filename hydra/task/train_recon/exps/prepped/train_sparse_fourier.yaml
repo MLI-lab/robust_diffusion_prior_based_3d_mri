@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - prepped/base_training
+  - /diffmodels: sparse_128_cached_bs1
+  - override /sample_logger: without_target
+
+diffmodels:
+  arch:
+    params:
+      kernel_interpolation_method: 'fourier'

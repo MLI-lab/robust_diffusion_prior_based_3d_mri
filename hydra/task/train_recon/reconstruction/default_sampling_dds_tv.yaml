@@ -1,0 +1,6 @@
+defaults:
+  - base
+  - sampling: dds_tv
+  - slice_methods: none
+
+method: 'sampling'

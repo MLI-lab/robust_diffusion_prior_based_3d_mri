@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+  - /exps/prepped/base_recon_rss
+
+problem_trafos:
+  target_trafo:
+    magnitude_enabled: true
+  fwd_trafo:
+    include_sensitivitymaps: false
+    use_synth_forward: true
+
+representation:
+  arch:
+    out_features: 1
+
+reconstruction:
+  variational:
+    fitting:
+      use_filterbackproj_as_init: true

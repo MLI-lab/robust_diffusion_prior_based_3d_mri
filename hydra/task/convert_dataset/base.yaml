@@ -1,0 +1,16 @@
+dataset_name: ???
+output_cache_subfolder: converted_datasets
+
+conversion:
+  name: canonical_h5
+  version: v1
+  mode: passthrough_h5
+  exists_ok: true
+  link: false
+  num_workers: 1
+  train:
+    input_relpath: train
+    mode: passthrough_h5
+  test_val:
+    input_relpath: test_val
+    mode: passthrough_h5

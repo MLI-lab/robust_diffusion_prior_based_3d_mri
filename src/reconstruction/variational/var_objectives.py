@@ -141,26 +141,22 @@ class L1WaveletObjective(BaseVariationalObjective):
 
         return datafit + regfit, datafit.item(), regfit.item()
 
+from src.reconstruction.variational.loss_resolver import resolve_loss
 class DiffusionVariationanlObjective(BaseVariationalObjective):
     def __init__(
         self,
         name : str,
-        reg_strength : float,
-        adapt_reg_strength : bool,
-        steps_scaler : float,
-        time_sampling_method : str,
         score : UNetModel,
         sde : SDE,
+        loss_cfg : Dict[str, Any],
         **base_obj_kwargs
     ):
         super().__init__(**base_obj_kwargs)
         self.name = name
-        self.reg_strength = reg_strength
-        self.adapt_reg_strength = adapt_reg_strength
-        self.steps_scaler = steps_scaler
-        self.time_sampling_method = time_sampling_method
         self.score = score
         self.sde = sde
+
+        self.loss_function = resolve_loss(**loss_cfg)
 
     def __call__(
         self,
@@ -193,17 +189,12 @@ class DiffusionVariationanlObjective(BaseVariationalObjective):
             datafit = torch.zeros(1, device=coord_rep.device)
 
         if inner_iteration in self.steps_data_reg:
-            nl = partial(noise_loss,
+            nl = partial(self.loss_function,
                 outer_iteration=outer_iteration,
                 outer_iterations_max=self.outer_iterations_max,
                 score=self.score,
-                sde=self.sde, 
-                repetition=1,
-                reg_strength=self.reg_strength,
-                adapt_reg_strength=self.adapt_reg_strength,
-                steps_scaler=self.steps_scaler,
-                time_sampling_method=self.time_sampling_method
-                )
+                sde=self.sde
+            )
 
             if self.slice_method_prior_reg is not None:
                 slices, slice_inds = self.slice_method_prior_reg(coord_rep, self.mesh_data_reg, self.mesh_data_con, outer_iteration=outer_iteration, inner_iteration=inner_iteration)
@@ -235,7 +226,16 @@ def get_variational_objective(
     **base_reg_kwargs
     ) ->  BaseVariationalObjective:
 
-    if cfg_regularization.name is None:
+    if cfg_regularization is None:
+        return NoPriorObjective(
+            **base_reg_kwargs
+        )
+
+    regularization_name = cfg_regularization.name
+    if isinstance(regularization_name, str):
+        regularization_name = regularization_name.strip().lower()
+
+    if regularization_name in [None, "none", "no", "nodiff", "no_diff", "no-diff", "noprior", "no_prior", "no-prior"]:
         return NoPriorObjective(
             **base_reg_kwargs
         )
@@ -247,7 +247,7 @@ def get_variational_objective(
             # steps_data_con=steps_data_con,
             # slice_method_data_con=slice_method_data_con
         # )
-    elif cfg_regularization.name == 'diffusion':
+    elif regularization_name in ['diffusion', 'infusion', 'diffusion_sampled']:
         return DiffusionVariationanlObjective(
             **cfg_regularization,
             **base_reg_kwargs
@@ -268,7 +268,7 @@ def get_variational_objective(
             # slice_method_prior_reg=slice_method_prior_reg,
             # **cfg_regularization
             # )
-    elif cfg_regularization.name == "lpwavelet":
+    elif regularization_name == "lpwavelet":
         return L1WaveletObjective(
             **cfg_regularization,
             **base_reg_kwargs
@@ -284,3 +284,8 @@ def get_variational_objective(
             # prior_trafo=prior_trafo,
             # **cfg_regularization
         # )
+    else:
+        raise ValueError(
+            f"Unknown variational regularization name: {cfg_regularization.name}. "
+            "Expected one of: None/'none' (no prior), 'diffusion', 'diffusion_sampled', 'infusion', 'lpwavelet'."
+        )

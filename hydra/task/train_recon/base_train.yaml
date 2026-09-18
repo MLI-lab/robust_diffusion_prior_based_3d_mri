@@ -1,0 +1,12 @@
+defaults:
+  - problem_trafos: default
+  - sample_logger: without_target
+
+seed: 1
+
+storage_settings:
+  is_remote: true
+  bucket_or_base_path: resrob-models
+  storage_name: resrob-models
+
+train_cache_subfolder: train_cache

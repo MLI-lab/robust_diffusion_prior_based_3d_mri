@@ -66,11 +66,14 @@ class FastMRIVolumeDataset(BaseDataset):
         dataset_is_3d : bool = True,
         volume_filter = "",
         recons_key = "reconstruction_mvue",
+        kspace_key = "kspace",
         sensmaps_key_in_h5 = "sensitivity_maps",
+        pseudoinverse_key_in_h5: Optional[str] = None,
         sensemap_3d_slice_from_fixed_view : bool = False,
         perspective_order : Tuple[str, str, str] = ("cor", "sag", "ax"),
         transpose_2D_slice : bool = False,
         sensmap_coil_dim_first : bool = False,
+        sensmap_coil_dim_nr : int = -3,
         smap_suffix = "_sensmap",
         smap_prefix = "",
     ):
@@ -125,7 +128,10 @@ class FastMRIVolumeDataset(BaseDataset):
         self.smap_suffix = smap_suffix
         self.smap_prefix = smap_prefix
 
+        self.sensmap_coil_dim_nr = sensmap_coil_dim_nr
+
         self.sensmaps_key_in_h5 = sensmaps_key_in_h5
+        self.pseudoinverse_key_in_h5 = pseudoinverse_key_in_h5
 
         if self.sensmap_files_root is not None:
             if not os.path.exists(self.sensmap_files_root):
@@ -135,6 +141,7 @@ class FastMRIVolumeDataset(BaseDataset):
 
         self.transform = transform
         self.recons_key = recons_key
+        self.kspace_key = kspace_key
         # self.recons_key = (
         ## "reconstruction_esc" if challenge == "singlecoil" else "reconstruction_rss"
         # "reconstruction_mvue"
@@ -223,7 +230,7 @@ class FastMRIVolumeDataset(BaseDataset):
                 warn(f"No ISMRMRD header found in {fname}.")
                 metadata_ismrmrd = {}
 
-            num_slices = hf["kspace"].shape[0]
+            num_slices = hf[self.recons_key].shape[0] if self.recons_key in hf else hf[self.kspace_key].shape[0]
 
             metadata = {
                 "num_slices" : num_slices,
@@ -308,28 +315,36 @@ class FastMRIVolumeDataset(BaseDataset):
         fname, slice_count, metadata = self.raw_samples[i]
 
         with h5py.File(fname, "r") as hf:
-            kspace = hf["kspace"][:] #[dataslice]
+            kspace = hf[self.kspace_key][:] if self.kspace_key in hf else None
 
-            kspace = torch.view_as_real(torch.from_numpy(kspace))
-            if self.dataset_is_fully_3d:
-                kspace = kspace.movedim(1, 0)
+            if kspace is not None:
+                kspace = torch.view_as_real(torch.from_numpy(kspace))
+                if self.dataset_is_fully_3d:
+                    kspace = kspace.movedim(1, 0)
 
-                if self.apply_fft1c_on_readout_dim:
-                    kspace = self._fft1c(kspace, dim=1, norm="ortho", shifts_enable=self.apply_fft1c_on_readout_dim_shifts)
-                    if self.readout_dim_keep_spatial:
-                        kspace = self._ifft1c(kspace, dim=1, norm="ortho")
-                        # if both enabled this effectively performs the z-dir readout kspace correction
+                    if self.apply_fft1c_on_readout_dim:
+                        kspace = self._fft1c(kspace, dim=1, norm="ortho", shifts_enable=self.apply_fft1c_on_readout_dim_shifts)
+                        if self.readout_dim_keep_spatial:
+                            kspace = self._ifft1c(kspace, dim=1, norm="ortho")
+                            # if both enabled this effectively performs the z-dir readout kspace correction
 
             mask = np.asarray(hf["mask"]) if "mask" in hf else None
+            trajectory = np.asarray(hf["trajectory"]) if "trajectory" in hf else None
 
             target = hf[self.recons_key][:] if self.recons_key in hf else None
-
-            target = torch.from_numpy(target)
+            target = torch.from_numpy(target) if target is not None else None
 
             attrs = dict(hf.attrs)
+            attrs["sample_idx"] = i
+            if mask is not None:
+                attrs["mask"] = mask
+            if trajectory is not None:
+                attrs["trajectory"] = trajectory
 
             if self.return_sensmaps and self.sensmaps_key_in_h5 is not None:
-                attrs["sens_maps"] = np.moveaxis(hf[self.sensmaps_key_in_h5][:], -3,-1)
+                attrs["sens_maps"] = np.moveaxis(hf[self.sensmaps_key_in_h5][:], self.sensmap_coil_dim_nr,-1)
+            if self.pseudoinverse_key_in_h5 is not None and self.pseudoinverse_key_in_h5 in hf:
+                attrs["pseudoinverse"] = hf[self.pseudoinverse_key_in_h5][:]
 
             attrs.update(metadata)
 

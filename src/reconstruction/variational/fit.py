@@ -32,6 +32,12 @@ def fit(
     cfg_fitting: Dict["str", Any],
 ) -> CoordBasedRepresentation:
 
+    if var_objective is None or not callable(var_objective):
+        raise TypeError(
+            f"Expected a callable variational objective, got {type(var_objective).__name__}. "
+            "Check reconstruction.variational.regularization.name in your config."
+        )
+
     optim_kwargs = cfg_fitting["optimizer"]
     scheduler_kwargs = cfg_fitting["lr_scheduler"]
 

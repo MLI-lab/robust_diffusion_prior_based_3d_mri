@@ -26,10 +26,7 @@ from src.utils.fftn3d import fft3c, ifft3c
 from sigpy.mri.samp import poisson, radial, spiral
 
 class SubsampledFourierTrafo3D(BaseFwdTrafo):
-    """
-    Subsampled Fourier ransform implemented by (sparse) matrix multiplication.
-
-    """
+    """Subsampled Fourier ransform implemented by (sparse) matrix multiplication."""
 
     def __init__(self,
             mask_enabled : bool,
@@ -40,7 +37,8 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
             include_sensitivitymaps : bool,
             sensitivitymaps_complex : bool,
             sensitivitymaps_fillouter : bool,
-            wrapped_2d_mode : bool
+            wrapped_2d_mode : bool,
+            use_synth_forward : bool = False,
         ):
         super().__init__()
 
@@ -54,6 +52,7 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
         self.include_sensitivitymaps = include_sensitivitymaps
         self.sensitivitymaps_complex = sensitivitymaps_complex
         self.sensitivitymaps_fillouter = sensitivitymaps_fillouter
+        self.use_synth_forward = use_synth_forward
 
 
     def _set_mask(self, obs_shape, calib_params) -> None:
@@ -79,8 +78,9 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
 
         if self.include_sensitivitymaps:
             
+            print(f"Calibrating sensitivity maps for shape: {observation.shape}, sensmap has shape {calib_params['sens_maps'].shape if calib_params is not None and 'sens_maps' in calib_params else 'N/A'}")
             if calib_params is not None:
-                logging.info("Using calibration parameters provided")
+                print("Using calibration parameters provided")
                 if calib_params["sens_maps"].shape[0] != 1:
                     S = torch.view_as_real(
                         torch.from_numpy(calib_params["sens_maps"]).moveaxis(-1,0)
@@ -94,16 +94,16 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
                 path = ""; enable_cache = False
                 import os
                 if enable_cache and os.path.exists(path):
-                    logging.warning(f"Loading sensmaps from file: {path}")
+                    print(f"Loading sensmaps from file: {path}")
                     with open(path, 'rb') as f:
                         sens_maps = np.load(f)
                 else:
-                    logging.warning("Multiple slices, calculations may take some time")
+                    print("Multiple slices, calculations may take some time")
                     assert not self.wrapped_2d_mode, "wrapped_2d_mode not supported for 3D sensemap calculation"
                     sens_maps = compute_sens_maps_3d(observation[0])
 
                     if enable_cache:
-                        logging.warning("Saving maps")
+                        print("Saving maps")
                         with open(path, 'wb') as f:
                             np.save(f, sens_maps)
 
@@ -118,6 +118,7 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
                 S = torch.view_as_real(S)
 
             self.sense_matrix = S.to(observation.device)
+            print(f"Sensitivity maps shape: {self.sense_matrix.shape}")
             self.sense_matrix_normalization_constant = S.abs().square().sum(dim=-4).sqrt().to(observation.get_device())
 
             # self.sense_matrix_normalization_constant[self.sense_matrix_normalization_constant == 0.0] = 1.0
@@ -135,17 +136,20 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
 
     def trafo(self, x: Tensor, slice_inds : Optional[Tensor] = None, slice_axis : Optional[int]= None) -> Tensor:
         if self.include_sensitivitymaps:
-            S = self.sense_matrix.to(x.get_device())
+            S = self.sense_matrix.to(x.get_device()).contiguous()
             if slice_inds is not None and slice_axis is not None:
                 S = S.index_select(slice_axis+1, slice_inds) # add +1 to skip coil dim in f ront
             # x shape (1, Coils, Z, Y, X, 2)
             if self.sensitivitymaps_complex:
                 x = torch.view_as_real(
-                    torch.view_as_complex(x.unsqueeze(-5)) * S
+                    torch.view_as_complex(x.unsqueeze(-5).contiguous()) * S #[None]
                 )
             else:
                 x = x.unsqueeze(-5) * S
 
+        if self.use_synth_forward:
+            x_real = x[..., 0] if x.shape[-1] == 2 else x
+            x = torch.stack([x_real, torch.zeros_like(x_real)], dim=-1)
         y = fft3c(x) if not self.wrapped_2d_mode else fastmri.fft2c(x)
         if self.mask is not None:
             return y * self.mask.to(y.get_device()) + 0.0
@@ -154,6 +158,9 @@ class SubsampledFourierTrafo3D(BaseFwdTrafo):
 
     def trafo_adjoint(self, y: Tensor) -> Tensor:
         x_hat = ifft3c(y) if not self.wrapped_2d_mode else fastmri.ifft2c(y)
+
+        if self.use_synth_forward:
+            x_hat = torch.stack([x_hat[..., 0], torch.zeros_like(x_hat[..., 0])], dim=-1)
 
         if self.include_sensitivitymaps:
             if self.sensitivitymaps_complex:

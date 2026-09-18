@@ -1,0 +1,33 @@
+# @package _global_
+defaults:
+  - /diffmodels/sampler: ddim3d
+  - /reconstruction/sampling: dds
+  - override /representation: identity
+  - override /reconstruction: default_variational_diff
+  - override /sample_logger: with_target
+
+diffmodels:
+  use_ema: true
+  model_from_epoch: -1
+  sampler:
+    num_steps: 10
+    cycling: False
+    cycling_skip_conditioning: False
+
+reconstruction:
+  method: hybrid_variational_sampling
+  hybrid_refinement:
+    start_timestep: 1
+    noise_mode: forward_marginal
+  variational:
+    fitting:
+      optimizer:
+        lr: 2.0
+        iterations: 200
+    regularization:
+      loss_cfg:
+        reg_strength: 0.01
+
+sweep:
+  ++reconstruction.variational.regularization.loss_cfg.reg_strength: [1e1,1e-4]
+  # ++reconstruction.sampling.alpha: [1.0,0.0]

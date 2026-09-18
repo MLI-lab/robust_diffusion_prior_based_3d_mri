@@ -1,0 +1,15 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: luesebrink
+
+raw_subfolder: luesebrink
+
+download:
+  mode: datalad
+  exists_ok: true
+  source: https://github.com/OpenNeuroDatasets/ds003563.git
+  get_paths:
+    - sub-yv98
+  recursive: true

@@ -1,0 +1,7 @@
+dataset_name: ???
+raw_cache_subfolder: raw
+raw_subfolder: null
+
+download:
+  mode: manual
+  exists_ok: true

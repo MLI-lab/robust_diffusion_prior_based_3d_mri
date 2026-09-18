@@ -1,0 +1,20 @@
+# @package _global_
+defaults:
+  - override /representation: identity
+  - override /reconstruction: default_variational_lpw
+  - override /sample_logger: with_target
+
+reconstruction:
+  variational:
+    fitting:
+      optimizer:
+        iterations: 200
+        lr: 1.0
+      lr_scheduler:
+        factor: 0.5
+        patience: 5
+    regularization:
+      reg_strength: 5e-10
+
+sweep:
+  ++reconstruction.variational.regularization.reg_strength: [1e0,1e-14]

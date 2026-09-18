@@ -1,0 +1,28 @@
+defaults:
+  - base_train
+  - _self_
+
+task_name: generic_h5
+
+input:
+  data_path_train: luesebrink_splitted/res_1mm_v14/train
+  data_path_val: luesebrink_splitted/res_1mm_v14/val
+  data_path_sensmaps_train: null
+  data_path_sensmaps_val: null
+
+preprocess:
+  scale_target_by_kspacenorm: True
+  target_scaling_factor: 1.0
+  target_interpolate_by_factor: 1.0
+  target_interpolation_method: fourier
+  recons_key: reconstruction_rss
+  output_recons_key: reconstruction_rss
+  sensmaps_key: sensitivity_maps
+  skip_sensmaps: true
+  perspectives: [sag, cor, ax]
+  apply_fft1c_on_readout_dim: True
+  apply_fft1c_on_readout_dim_shifts: [True, True]
+  readout_dim: 0
+  readout_dim_keep_spatial: False
+  dataset_is_3d: True
+  volume_filter: '.*\.h5'

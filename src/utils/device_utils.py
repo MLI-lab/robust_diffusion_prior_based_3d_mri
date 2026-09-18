@@ -1,8 +1,10 @@
+# %%
 import torch
 import pandas as pd
 import subprocess
 from io import StringIO
 import time
+
 
 def get_device_id(ind):
     if torch.cuda.device_count() == 1:
@@ -46,7 +48,31 @@ def get_free_cuda_devices(update_enabled: bool = True, min_gpu : float = 80, min
     else:
         return get_free_devices_nvidia_smi_rep(min_gpu=min_gpu, min_mem=min_mem, rep=rep, wait_time=wait_time)
 
+
+def print_device_infos_cuda():
+    device_nrs = torch.cuda.device_count()
+    for d_ind in range(device_nrs):
+        device = torch.device(d_ind)#"cuda" if device_nrs == 1 else f"cuda:{d_ind}")
+        if device.type == 'cuda':
+            print(f"---- device: {get_device_id(d_ind)} ------")
+            print(f"Device: {torch.cuda.get_device_name(d_ind)}")
+            print('Memory Usage:')
+            print('Allocated:', torch.cuda.memory_allocated(d_ind), 'GB')
+            print('Cached:   ', torch.cuda.memory_reserved(d_ind), 'GB')
+        
 def get_device_infos_nvidia_smi():
     result = subprocess.run(["nvidia-smi", "--query-gpu=index,gpu_name,memory.total,memory.used,memory.free,temperature.gpu,pstate,utilization.gpu,utilization.memory", "--format=csv"], stdout=subprocess.PIPE)
     txt = result.stdout.decode("utf-8")
     return pd.read_csv(StringIO(txt))
+
+
+def print_device_infos_cuda():
+    device_nrs = torch.cuda.device_count()
+    for d_ind in range(device_nrs):
+        device = torch.device(d_ind)#"cuda" if device_nrs == 1 else f"cuda:{d_ind}")
+        if device.type == 'cuda':
+            print(f"---- device: {get_device_id(d_ind)} ------")
+            print(f"Device: {torch.cuda.get_device_name(d_ind)}")
+            print('Memory Usage:')
+            print('Allocated:', torch.cuda.memory_allocated(d_ind), 'GB')
+            print('Cached:   ', torch.cuda.memory_reserved(d_ind), 'GB')

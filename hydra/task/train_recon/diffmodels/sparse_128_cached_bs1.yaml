@@ -1,0 +1,8 @@
+defaults:
+  - sparse_128_cached
+
+train:
+  batch_size: 1
+
+val:
+  batch_size: 1

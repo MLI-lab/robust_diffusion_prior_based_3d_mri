@@ -1,0 +1,32 @@
+defaults:
+  - base_train
+  - _self_
+
+task_name: generic_h5
+
+input:
+  data_path_train: null
+  data_path_val: null
+  data_path_sensmaps_train: null
+  data_path_sensmaps_val: null
+
+preprocess:
+  scale_target_by_kspacenorm: True
+  target_scaling_factor: 1.0
+  target_interpolate_by_factor: 1.0
+  target_interpolation_method: fourier
+
+  compute_mvue_from_kspace: True
+  sensmap_mode: bart_from_kspace
+  recons_key: reconstruction_mvue
+  output_recons_key: reconstruction_mvue
+  sensmaps_key: null
+  skip_sensmaps: true
+  perspectives: [sag, cor, ax]
+  volume_filter: ".*\\.h5"
+
+  apply_fft1c_on_readout_dim: True
+  apply_fft1c_on_readout_dim_shifts: [True, False]
+  readout_dim: 0
+  readout_dim_keep_spatial: False
+  dataset_is_3d: True

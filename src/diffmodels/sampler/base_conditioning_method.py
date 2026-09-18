@@ -11,6 +11,13 @@ class ConditioningMethod(ABC):
         self.fwd_trafo = fwd_trafo
         self.observation = observation
         self.sde = sde
+        self.requires_score_grad = False
+
+    def init_sampling(self, x : Tensor) -> None:
+        """
+            Called once at the beginning of the sampling process.
+        """
+        pass
 
     @abstractmethod
     def pre_prediction_step(
@@ -20,11 +27,7 @@ class ConditioningMethod(ABC):
         score_xt: Optional[Tensor],
         xhat0: Optional[Tensor]
     ) -> Tuple[Tensor, Tensor]:
-        """
-            Called before the prediction step of the sampler. 
-
-            Returns (updates of) the current state x, and the current MMSE estimate of x0 (xhat0).
-        """
+        """Called before the prediction step of the sampler."""
         pass
 
     @abstractmethod
@@ -35,10 +38,7 @@ class ConditioningMethod(ABC):
         t: Tensor,
         score_xt: Tensor
     ) -> Tensor:
-        """
-            Called after the prediction step of the sampler.
-            Receives the result after the pre-conditioning step (x_pre_cond) and the result after the subsequent conditioning step (x_pred).
-
-            Returns a conditioned update of the new state x.
+        """Called after the prediction step of the sampler.
+        Receives the result after the pre-conditioning step (x_pre_cond) and the result after the subsequent conditioning step (x_pred).
         """
         pass

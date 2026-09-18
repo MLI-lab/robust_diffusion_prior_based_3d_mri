@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - /dataset: prepped_fastmri_2d
+  - override /problem_trafos/fwd_trafo: null
+  - override /problem_trafos/target_trafo: null
+  - override /problem_trafos/prior_trafo: crop_mag_complex_slices
+  - override /problem_trafos/dataset_trafo: mri2d_train_prepped_mvue
+
+problem_trafos:
+  prior_trafo:
+    scaling_factor: 1.0
+    move_axis: [-1, 1]
+  dataset_trafo:
+    scale_target_by_kspacenorm: False
+    target_scaling_factor: 1.0
+    normalize_target: False
+    target_interpolate_by_factor: 1.0
+
+dataset:
+  fold: train
+  data_object_type: slices

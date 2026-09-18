@@ -1,5 +1,0 @@
-defaults:
-  - base
-  - arch: dense
-  - sde: default
-  - sampler: ddim

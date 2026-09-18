@@ -1,0 +1,42 @@
+# @package _global_
+defaults:
+  - /dataset: prepped_fastmri_3d
+  - override /problem_trafos/fwd_trafo: mri3d
+  - override /problem_trafos/target_trafo: crop_mag
+  - override /problem_trafos/prior_trafo: crop_mag
+  - override /problem_trafos/dataset_trafo: prepared_mri3d_recon
+  - override /representation: identity
+
+problem_trafos:
+  prior_trafo:
+    magnitude_enabled: true
+    move_axis: null
+    stack_channel_into_batchdim: true
+    scaling_factor: 1.0
+  target_trafo:
+    magnitude_enabled: true
+  fwd_trafo:
+    include_sensitivitymaps: false
+  dataset_trafo:
+    sampling_kind: cartesian
+    target_type: rss
+    which_challenge: singlecoil
+
+sample_logger:
+  volume_stats_period: 50
+  volume_stats__wandb_take_mean_slice_period: 50
+  log_gt_fbp_to_wandb: false
+  log_data_is_complex: false
+
+dataset:
+  fold: test
+  data_object_type: volumes
+
+representation:
+  mesh_data:
+    field_of_view: [1.0, 1.0, 1.0]
+
+diffmodels:
+  use_ema: true
+  model_use_ema: true
+  model_from_epoch: -1

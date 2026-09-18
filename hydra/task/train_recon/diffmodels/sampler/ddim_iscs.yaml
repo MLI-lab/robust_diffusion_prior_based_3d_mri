@@ -1,0 +1,6 @@
+defaults:
+  - base
+
+name: 'ddim_iscs'
+eta: .95
+num_steps: 400

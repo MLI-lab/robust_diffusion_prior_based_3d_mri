@@ -1,7 +1,0 @@
-defaults:
-  - base
-  - variational/fitting: base
-  - variational/regularization: none
-  - slice_methods: none
-
-method: 'variational'

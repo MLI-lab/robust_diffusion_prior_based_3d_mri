@@ -1,0 +1,8 @@
+# @package _global_
+input:
+  data_path_train: luesebrink_splitted/res_05mm_v14/train
+  data_path_val: luesebrink_splitted/res_05mm_v14/val
+
+preprocess:
+  volume_filter_train: '.*\.h5'
+  volume_filter_val: '.*sag.*.h5'

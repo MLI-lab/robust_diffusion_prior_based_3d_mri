@@ -1,0 +1,24 @@
+# @package _global_
+defaults:
+  - override /representation: gaussian
+  - override /reconstruction: default_variational_diff
+  - override /sample_logger: with_target
+
+diffmodels:
+  use_ema: true
+  model_from_epoch: -1
+
+representation:
+  mesh_prior_scale_factor: 1.0
+  opt_params:
+    random_subset: False
+
+reconstruction:
+  variational:
+    fitting:
+      optimizer:
+        iterations: 200
+
+sweep:
+  ++reconstruction.variational.regularization.loss_cfg.reg_strength: [1e1, 1e-4]
+  ++representation.opt_params.lr_scale: [10.0, 0.1]

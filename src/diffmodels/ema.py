@@ -29,14 +29,7 @@ class ExponentialMovingAverage:
     self.collected_params = []
 
   def update(self, parameters):
-    """
-    Update currently maintained parameters.
-    Call this every time the parameters are updated, such as the result of
-    the `optimizer.step()` call.
-    Args:
-      parameters: Iterable of `torch.nn.Parameter`; usually the same set of
-        parameters used to initialize this object.
-    """
+    """Update currently maintained parameters."""
 
     decay = self.decay
     if self.num_updates is not None:
@@ -49,12 +42,7 @@ class ExponentialMovingAverage:
         s_param.sub_(one_minus_decay * (s_param - param))
 
   def copy_to(self, parameters):
-    """
-    Copy current parameters into given collection of parameters.
-    Args:
-      parameters: Iterable of `torch.nn.Parameter`; the parameters to be
-        updated with the stored moving averages.
-    """
+    """Copy current parameters into given collection of parameters."""
 
     parameters = [p if not self.use_cpu else p.cpu() for p in parameters if p.requires_grad]
     for s_param, param in zip(self.shadow_params, parameters):
@@ -62,25 +50,11 @@ class ExponentialMovingAverage:
         param.data.copy_(s_param.data)
 
   def store(self, parameters):
-    """
-    Save the current parameters for restoring later.
-    Args:
-      parameters: Iterable of `torch.nn.Parameter`; the parameters to be
-        temporarily stored.
-    """
+    """Save the current parameters for restoring later."""
     self.collected_params = [param.clone() if not self.use_cpu else param.clone().cpu() for param in parameters]
 
   def restore(self, parameters):
-    """
-    Restore the parameters stored with the `store` method.
-    Useful to validate the model with EMA parameters without affecting the
-    original optimization process. Store the parameters before the
-    `copy_to` method. After validation (or model saving), use this to
-    restore the former parameters.
-    Args:
-      parameters: Iterable of `torch.nn.Parameter`; the parameters to be
-        updated with the stored parameters.
-    """
+    """Restore the parameters stored with the `store` method."""
 
     for c_param, param in zip(self.collected_params, parameters):
       param.data.copy_(c_param.data)

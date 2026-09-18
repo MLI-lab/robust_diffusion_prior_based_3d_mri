@@ -1,0 +1,5 @@
+defaults:
+  - prepped_fastmri_2d
+
+stack_num_slices: 3
+stack_padding_mode: edge

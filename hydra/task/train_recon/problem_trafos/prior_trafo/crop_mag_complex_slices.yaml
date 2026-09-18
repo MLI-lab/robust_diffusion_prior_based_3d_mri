@@ -1,0 +1,16 @@
+defaults:
+  - base
+
+name: CroppedMagnitudeImage
+crop_size: [320, 320]
+center_crop_enabled: false
+magnitude_enabled: false
+normalize_enabled: false
+scaling_factor: 1.0
+swap_channels: false
+move_axis: [-1, 1]
+squeeze_channels: null
+unsqueeze_channels: null
+stack_channel_into_batchdim: false
+stack_z_into_batchdim: false
+conv_averaging_shape: null

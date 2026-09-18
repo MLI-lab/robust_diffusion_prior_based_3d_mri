@@ -1,0 +1,17 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: cc359
+
+conversion:
+  name: cc359_fastmri_h5
+  task_name: cc359
+  mode: python
+  exists_ok: true
+  train:
+    input_relpath: Train
+    mode: python
+  test_val:
+    input_relpath: Val
+    mode: python

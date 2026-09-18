@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - /diffmodels/sampler: ddim3d
+  - override /reconstruction: default_sampling_dds_tv
+  - override /representation: identity
+
+diffmodels:
+  sampler:
+    num_steps: 80
+    cycling: False
+    cycling_skip_conditioning: False
+
+reconstruction:
+  sampling:
+    rho:   0.01
+    lamb : 0.0001
+    admm_iters: 1
+
+sweep:
+  ++reconstruction.sampling.rho: [1.0,1e-6]
+  ++reconstruction.sampling.alpha: [0.0, 1.0]

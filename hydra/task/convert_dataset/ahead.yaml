@@ -1,0 +1,22 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: ahead
+
+conversion:
+  name: ahead_fastmri_h5
+  task_name: ahead
+  mode: python
+  exists_ok: true
+  version: v1
+
+  perspective: sag
+  scale: 1e14
+
+  train:
+    input_relpath: train
+    mode: python
+  test_val:
+    input_relpath: test_val
+    mode: python

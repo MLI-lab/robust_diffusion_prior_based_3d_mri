@@ -1,0 +1,3 @@
+# @package _global_
+preprocess:
+  target_interpolate_by_factor: 1.0

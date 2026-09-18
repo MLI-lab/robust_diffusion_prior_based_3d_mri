@@ -1,5 +1,4 @@
-'''
-The derivations are given in [https://arxiv.org/pdf/2011.13456.pdf] Appendix C.
+'''The derivations are given in [https://arxiv.org/pdf/2011.13456.pdf] Appendix C.
 Based on: https://github.com/yang-song/score_sde_pytorch/blob/main/sde_lib.py
 '''
 import torch
@@ -62,6 +61,9 @@ class SDE(abc.ABC):
 	def tweedy(self, x : Tensor, t : Tensor, score_xt : Tensor):
 		pass
 
+	def eps_from_x0(self, x : Tensor, t : Tensor, x0_pred : Tensor):
+		pass
+
 
 class DDPM(SDE):
 	def __init__(self, beta_min: float = 0.0001, beta_max: float = 0.02, num_steps: int = 1000):
@@ -104,18 +106,28 @@ class DDPM(SDE):
 	def prior_sampling(self, shape):
 		return torch.randn(*shape) 
 
+	# TODO: check this
+	def posterior_mean_approx(self, x, t, score_t):
+		bar_a = self._compute_alpha_cumprod(t)
+		#return (x + (1-bar_a) * score_t) / math.sqrt(bar_a)
+		return (x - math.sqrt(1-bar_a) * score_t) / math.sqrt(bar_a)
+
+	def eps_from_x0(self, x : Tensor, t : Tensor, x0_pred : Tensor):
+		bar_a = self._compute_alpha_cumprod(t)
+		return (x - math.sqrt(bar_a) * x0_pred) / torch.sqrt(1. - bar_a)
+
 	def tweedy(self, x : Tensor, t : Tensor, score_xt : Tensor):
 		div = self.marginal_prob_mean(t)[:, None, None, None].pow(-1)
 		std_t = self.marginal_prob_std(t)[:, None, None, None]
 		update = x - score_xt * std_t
 		return update * div
 
-def load_sde_model(cfg: DictConfig):
+def load_sde_model(beta_min : float, beta_max : float, num_steps : int):
 
     sde = DDPM(
-		beta_min=cfg.sde.beta_min,
-		beta_max=cfg.sde.beta_max,
-		num_steps=cfg.sde.num_steps,
+			beta_min=beta_min,
+			beta_max=beta_max,
+			num_steps=num_steps,
     	)
     
     return sde

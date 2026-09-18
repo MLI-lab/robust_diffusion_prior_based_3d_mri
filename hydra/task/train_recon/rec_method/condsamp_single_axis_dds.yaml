@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - /diffmodels/sampler: ddim3d
+  - override /reconstruction: default_sampling_diff
+  - override /representation: identity
+
+diffmodels:
+  sampler:
+    num_steps: 80
+    cycling: False
+    cycling_skip_conditioning: False
+
+sweep:
+  ++reconstruction.sampling.alpha: [1.0, 0.0]

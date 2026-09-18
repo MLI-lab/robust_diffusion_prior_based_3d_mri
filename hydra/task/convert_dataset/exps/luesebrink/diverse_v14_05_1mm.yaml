@@ -1,0 +1,13 @@
+# @package _global_
+conversion:
+  subset_name: diverse_v14_05_1mm
+  subset_model:
+    train:
+      source: train_pool
+      resolutions: [0.5, 0.6, 0.7, 0.8, 1.0]
+      volume_limit: 14
+      distribute_volume_limit_by_resolution: true
+      allow_short_resolution_groups: true
+    test_val:
+      source: test_val_pool
+      resolutions: [0.5, 0.6, 0.7, 0.8, 1.0]

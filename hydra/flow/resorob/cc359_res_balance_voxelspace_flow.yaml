@@ -1,0 +1,221 @@
+name: tuned_recon_protocol_flow
+protocol:
+  mode: standard
+  smoke_test: false
+data:
+  source:
+    enabled: true
+    download:
+      config_path: task/download_dataset
+      config_name: cc359
+      overrides: []
+      sweep: {}
+      cache_refresh: false
+      num_gpus: 0
+    conversion:
+      shared:
+        config_path: task/convert_dataset
+        config_name: cc359
+        overrides:
+        - ++conversion.version=v1
+        - ++conversion.num_workers=4
+        sweep: {}
+        cache_refresh: false
+        num_gpus: 0
+      train: null
+      recon: null
+  preprocess:
+    train:
+      config_path: task/preprocess_dataset
+      config_name: cc359_train
+      overrides:
+      - ++preprocess.num_workers=4
+      sweep:
+        +exps:
+        - cc359_vx/1mm
+        - cc359_vx/1_125mm
+        - cc359_vx/1_25mm
+        - cc359_vx/1_375mm
+        - cc359_vx/1_5mm
+        - cc359_vx/1_625mm
+        - cc359_vx/1_75mm
+        - cc359_vx/1_875mm
+        - cc359_vx/2mm
+        - cc359_vx/diverse_vx2
+        - cc359_vx/diverse_vx3
+        - cc359_vx/diverse_vx5
+        - cc359_vx/diverse_cont_vx
+        - cc359_vx/diverse_vx5_coarseheavy
+        - cc359_vx/diverse_vx5_fineheavy
+        - cc359_vx/diverse_vx5_centerheavy
+        - cc359_vx/diverse_vx5_bimodal
+        - cc359_vx/diverse_cont_vx_coarseheavy
+        - cc359_vx/diverse_cont_vx_fineheavy
+        - cc359_vx/diverse_cont_vx_centerheavy
+        - cc359_vx/diverse_cont_vx_bimodal
+      cache_refresh: false
+      num_gpus: 1
+    recon:
+      config_path: task/preprocess_dataset
+      config_name: cc359_recon_cartesian_noacs
+      overrides:
+      - ++preprocess.mask_type='Poisson2D'
+      - ++preprocess.mask_seed=1234
+      - ++preprocess.num_workers=8
+      - ++preprocess.target_interpolate_by_factor=1.0
+      - ++preprocess.mask_accelerations=16.0
+      sweep:
+        ++preprocess.target_interpolate_by_factor: [1.0, 0.888889, 0.8, 0.727273, 0.666667, 0.615385, 0.571429, 0.533333, 0.5]
+      cache_refresh: false
+      num_gpus: 1
+model:
+  train:
+    config_path: task/train_recon
+    config_name: base_train
+    overrides:
+    - +exps=prepped/train_dense
+    sweep: {}
+    cache_refresh: false
+    num_gpus: 1
+    post_overrides:
+    - ++diffmodels.train.training_steps=100000
+    - ++diffmodels.train.batch_size=8
+    - ++diffmodels.val.batch_size=8
+    - ++problem_trafos.prior_trafo.scaling_factor=1.0
+reconstruction:
+  config_path: task/train_recon
+  config_name: base_recon
+  overrides:
+  - +exps=prepped/base_recon
+  post_overrides:
+  - ++problem_trafos.prior_trafo.scaling_factor=1.0
+  - ++problem_trafos.prior_trafo.normalize_enabled=False
+  - ++problem_trafos.fwd_trafo.sensitivitymaps_fillouter=True
+  - ++reconstruction.variational.fitting.optimizer.iterations=200
+  - ++sample_logger.volume_stats_period=100
+  - ++sample_logger.volume_stats__wandb_take_mean_slice_period=999999
+  - ++sample_logger.volume_stats__wandb_video_period=999999
+  - ++sample_logger.volume_stats_period=100
+  method_sweep:
+    +rec_method:
+    - varrecon_voxelrep_diffprior
+    - condsamp_diffmbir_dds
+  common_overrides:
+  - ++seed=1
+  common_post_overrides: []
+  hp_sharing:
+    assume_same:
+      - ++preprocess.mask_accelerations
+      - preprocess_train.+exps
+    representative:
+      preprocess_train.+exps: cc359_vx/1mm
+  tuning:
+    selection_config_path: task/tuning_selection
+    selection_config_name: config
+    selection_overrides:
+    - ++selection_method=best_overall
+    - ++tune_metric=rec_psnr
+    - ++tune_metric_take_max=True
+    - ++secondary_mode=none
+    hp_overrides: []
+    hp_sweep_key: sweep
+    hp_sweep_extra: {}
+    hp_log_wandb: false
+    coarse_budget_trials_per_param: 8
+    refine_budget_trials_per_param: 4
+    cache_refresh: false
+    num_gpus: 0
+    aggregate_sweep:
+      ++sample_idx: range(0,4)
+  evaluation:
+    sweep:
+      ++sample_idx: range(4,20)
+    run_overrides: []
+    cache_refresh: false
+    num_gpus: 1
+  visual_evaluation:
+    sweep:
+      ++sample_idx: [0]
+    overrides_extra:
+    - ++sample_logger.save_final_sample=True
+    - ++sample_logger.save_ground_truth=True
+    cache_refresh: false
+    num_gpus: 1
+    save_result_enable: null
+reporting:
+  sweep_plot:
+    config_path: task/plot
+    config_name: seaborn_sweep_plot
+    overrides:
+    - ++pivot_tables=[{name:cc359_vx_balance_metrics,title:"CC359 Voxel-Space Resolution Balance Sweep",metrics:[rec_psnr,rec_ssim],rows:["preprocess_train.+exps",+rec_method],cols:["preprocess.target_interpolate_by_factor"],agg:[mean],include_std:false,decimals:3}]
+    num_gpus: 1
+    split_params:
+    - +rec_method
+  visual_plot:
+    enabled: true
+    config_path: task/plot_visual_3d
+    config_name: config
+    overrides:
+    - ++auto_zoom_enabled=true
+    - ++auto_zoom_grouping_key=++preprocess.target_interpolate_by_factor
+    - ++auto_zoom_scoring_mode=disagreement_only
+    - ++auto_zoom_search_stride=2
+    - ++zoom_size_frac=0.20
+    - ++zoom_center_frac_h=0.5
+    - ++zoom_center_frac_w=0.5
+    - ++metric_overlay_metrics=[rec_psnr, rec_ssim]
+    num_gpus: 1
+    split_params:
+    - +rec_method
+smoke:
+  enabled: false
+  overrides:
+    data:
+      download_overrides: []
+      conversion_overrides:
+      - ++conversion.version=smoke_v1
+      - ++conversion.max_files_per_fold=2
+      conversion_sweep: null
+      train_conversion_overrides: null
+      train_conversion_sweep: null
+      recon_conversion_overrides: null
+      recon_conversion_sweep: null
+      preprocess_train_overrides:
+      - ++preprocess.volume_limit=2
+      - ++preprocess.visualize.enabled=True
+      - ++preprocess.visualize.num_volumes=1
+      preprocess_recon_overrides:
+      - ++preprocess.volume_limit=2
+      - ++preprocess.visualize.enabled=True
+      - ++preprocess.visualize.num_volumes=1
+      preprocess_recon_sweep:
+        ++preprocess.mask_accelerations:
+        - 24.0
+    model:
+      train_post_overrides:
+      - ++diffmodels.train.training_steps=10
+      - ++diffmodels.train.n_log_total=2
+      - ++diffmodels.train.n_save_total=2
+      - ++diffmodels.val.n_eval_total=2
+      - ++diffmodels.val.n_sample_total=2
+      - ++diffmodels.sampler.num_steps=10
+    reconstruction:
+      post_overrides:
+      - ++reconstruction.variational.fitting.optimizer.iterations=1
+      method_sweep:
+        +rec_method:
+        - varrecon_voxelrep_noprior
+      aggregate_sweep:
+        ++sample_idx:
+        - 0
+      evaluation_sweep:
+        ++sample_idx:
+        - 0
+      visual_evaluation_sweep:
+        ++sample_idx:
+        - 0
+      coarse_budget_trials_per_param: 1
+      refine_budget_trials_per_param: 1
+    reporting:
+      visual_plot_enabled: true
+      aggregate_plot_enabled: null

@@ -35,6 +35,7 @@ from fastmri.data.transforms import MaskFunc, to_tensor, complex_center_crop, no
 from src.problem_trafos.fwd_trafo.base_fwd_trafo import BaseFwdTrafo
 from src.problem_trafos.dataset_trafo.mask_utils import apply_mask
 import fastmri
+from fastmri import fft2c, ifft2c
 
 from src.datasets.fastmri_volume_dataset import FastMRIVolumeDataset
 from fastmri.data.mri_data import FastMRIRawDataSample
@@ -44,6 +45,28 @@ import torchvision.transforms.functional as TF
 
 from .base_dataset_trafo import BaseDatasetTrafo
 from src.datasets.fastmri_slice_dataset import SliceDatasetSample
+
+
+def _ensure_separate_complex_dim(x: torch.Tensor) -> torch.Tensor:
+    # fastmri.fft2c expects a trailing complex dim of size 2.
+    if torch.is_complex(x):
+        return torch.view_as_real(x.contiguous())
+    if x.shape[-1] == 2:
+        return x
+    return torch.stack((x, torch.zeros_like(x)), dim=-1)
+
+
+def _fourier_crop_2d(x: torch.Tensor, factor: int) -> torch.Tensor:
+    x = _ensure_separate_complex_dim(x)
+    kspace = fft2c(x)                              # (..., H, W, 2)
+    *_, H, W, _ = kspace.shape
+    nH = int(round(H * factor))
+    nW = int(round(W * factor))
+    sH = (H - nH) // 2
+    sW = (W - nW) // 2
+    kspace_cropped = kspace[..., sH:sH + nH, sW:sW + nW, :]
+    return ifft2c(kspace_cropped).contiguous()
+
 
 class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
     """
@@ -70,7 +93,8 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
         multicoil_reduction_op : bool = "sum",
         target_interpolate_by_factor : float = 1.0,
         target_interpolate_factor_is_interval : bool = False,
-        target_interpolate_method : str = "nearest",
+        target_interpolation_method : str = "fourier",
+        target_interpolate_concat_grid : bool = False,
         device : str = "cpu",
         fwd_trafo : BaseFwdTrafo = None
     ):
@@ -93,7 +117,8 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
         self.target_scaling_factor = target_scaling_factor
         self.target_interpolate_by_factor = target_interpolate_by_factor
         self.target_interpolate_factor_is_interval = target_interpolate_factor_is_interval
-        self.target_interpolate_method = target_interpolate_method
+        self.target_interpolation_method = target_interpolation_method
+        self.target_interpolate_concat_grid = target_interpolate_concat_grid
 
         self.pseudoinverse_conv_averaging_shape = pseudoinverse_conv_averaging_shape
         self.device = device
@@ -124,10 +149,19 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
         kspace, target, attrs = sample.kspace, sample.target, sample.attrs
         masked_kspace, target_torch, image = None, None, None
         crop_size = (320, 320)
+        sample_idx = attrs.get("sample_idx", None)
+        mask_seed = self.mask_seed if sample_idx is None else int(self.mask_seed) + int(sample_idx)
 
-        kspace_torch = to_tensor(kspace) if not torch.is_tensor(kspace) else kspace
+        kspace_torch = to_tensor(kspace) if not kspace is None and not torch.is_tensor(kspace) else kspace
+        if kspace is not None:
+            if torch.is_tensor(kspace):
+                kspace_torch = kspace
+            else:
+                kspace_torch = to_tensor(kspace)
+        else:
+            kspace_torch = None
 
-        if self.device is not None:
+        if self.device is not None and kspace_torch is not None:
             kspace_torch = kspace_torch.to(self.device)
 
         if self.provide_pseudoinverse or self.provide_measurement:
@@ -138,10 +172,10 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
             if self.mask_func is not None:
                 if self.mask_type == 'Poisson2D':
                     print(f"mask shape: {kspace_torch.shape}, acceleration: {self.mask_accelerations}")
-                    self.mask = torch.from_numpy(poisson(kspace_torch.shape[-3:-1], self.mask_accelerations, seed=self.mask_seed).astype(np.float32)).unsqueeze(dim=-1)
+                    self.mask = torch.from_numpy(poisson(kspace_torch.shape[-3:-1], self.mask_accelerations, seed=mask_seed).astype(np.float32)).unsqueeze(dim=-1)
                     masked_kspace = kspace_torch * self.mask.to(kspace_torch.get_device())
                 else:
-                    masked_kspace, _, _ = apply_mask(kspace_torch, self.mask_func, seed=self.seed)
+                    masked_kspace, _, _ = apply_mask(kspace_torch, self.mask_func, seed=mask_seed)
             else:
                 masked_kspace = kspace_torch
 
@@ -179,21 +213,29 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
 
         # normalize target
         if target is not None:
+            is_stacked = (target.ndim == 4)
 
             if self.target_type == "rss":
                 target_torch = to_tensor(target) if not torch.is_tensor(target) else target
+
+                if not is_stacked:
+                    if target_torch.ndim == 2:
+                        target_torch = target_torch[:, :, None] # Add a channel dimension
+                else:
+                    if target_torch.ndim == 3:
+                        target_torch = target_torch[..., None] # Add a channel dimension
 
                 if self.device is not None:
                     target_torch = target_torch.to(self.device)
 
             elif self.target_type == "mvue":
-                    target_torch = to_tensor(target) if not torch.is_tensor(target) else target
-    
-                    if self.device is not None:
-                        target_torch = target_torch.to(self.device)
-    
-                    #target_torch = torch.view_as_real(target_torch)
-                
+                target_torch = to_tensor(target) if not torch.is_tensor(target) else target
+
+                if self.device is not None:
+                    target_torch = target_torch.to(self.device)
+
+                # target_torch = torch.view_as_real(target_torch)
+
             elif self.target_type == "fullysampled_rec":
                 target_torch = fastmri.ifft2c(kspace_torch)
                 if self.which_challenge == "multicoil":
@@ -204,20 +246,25 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
                     elif self.multicoil_reduction_op == "norm":
                         target_torch = target_torch.norm(dim=0)
                     elif self.multicoil_reduction_op == "norm_sum_sensmaps":
-                        S = torch.from_numpy(attrs["sens_maps"]).to(target_torch.device)
-                        target_torch = torch.view_as_real(torch.sum(torch.view_as_complex(target_torch) * torch.conj(S), dim=dim))
+                        S = torch.from_numpy(attrs["sens_maps"]).to(target_torch.device) # shape is: (Coils, X, Y)
+                        if S.abs().sum() == 0.0:
+                            target_torch = torch.zeros_like(target_torch).sum(dim=0)
+                        else:
+                            S[S == 0] = S[S != 0].abs().min() + 0j # replace zeros with minimum value
+                            dim=0
+                            S_norm = S.abs().square().sum(dim=dim).sqrt()
+                            target_torch = torch.view_as_real(torch.sum(torch.view_as_complex(target_torch) * torch.conj(S), dim=dim) / S_norm)
                     else:
                         raise NotImplementedError(f"Reduction operation {self.multicoil_reduction_op} not supported")
 
-            if self.scale_target_by_kspacenorm:
-                # for rss images one would need another "sqrt(2)" for the target vol shape product
-                target_torch =  target_torch * math.sqrt(float(np.prod(attrs["target_vol_shape"]).item())) / attrs["kspace_vol_norm"]
-            
-            if self.target_scaling_factor != 1.0:
-                target_torch = target_torch * self.target_scaling_factor
+            if is_stacked:
+                slices = list(torch.unbind(target_torch, dim=0))
+            else:
+                slices = [target_torch]
 
+            temp_slice = slices[0]
+            factor = None
             if self.target_interpolate_by_factor is not None:
-                
                 if isinstance(self.target_interpolate_by_factor, str):
                     self.target_interpolate_by_factor = eval(self.target_interpolate_by_factor)
 
@@ -229,17 +276,75 @@ class FastMRI2DDataTransform(BaseDatasetTrafo[SliceDatasetSample]):
                         factor = self.target_interpolate_by_factor[0] + rnd_factor * (self.target_interpolate_by_factor[1] - self.target_interpolate_by_factor[0])
                     else:
                         factor = self.target_interpolate_by_factor[torch.randint(0, len(self.target_interpolate_by_factor), size=(1,)).item()]
-    
-                target_torch = torch.nn.functional.interpolate(target_torch.movedim(-1, 0).unsqueeze(0), scale_factor=factor, mode=self.target_interpolate_method).squeeze(0).movedim(0,-1)
 
+            crop_i = None
+            crop_j = None
             if self.target_random_crop_size is not None:
-                i = torch.randint(0, target_torch.shape[-3]-self.target_random_crop_size[0] + 1, size=(1,)).item()
-                j = torch.randint(0, target_torch.shape[-2]-self.target_random_crop_size[1] + 1, size=(1,)).item()
-                target_torch = TF.crop(target_torch.movedim(-1, 0).unsqueeze(0), i, j, self.target_random_crop_size[0], self.target_random_crop_size[1]).squeeze(0).movedim(0, -1)
+                test_shape = temp_slice.shape
+                if factor is not None:
+                    if self.target_interpolation_method == "fourier":
+                        H, W = test_shape[-3], test_shape[-2]
+                        nH = int(round(H * factor))
+                        nW = int(round(W * factor))
+                        test_shape = (nH, nW, test_shape[-1])
+                    else:
+                        H, W = test_shape[-3], test_shape[-2]
+                        nH = int(H * factor)
+                        nW = int(W * factor)
+                        test_shape = (nH, nW, test_shape[-1])
+                
+                crop_i = torch.randint(0, test_shape[-3] - self.target_random_crop_size[0] + 1, size=(1,)).item()
+                crop_j = torch.randint(0, test_shape[-2] - self.target_random_crop_size[1] + 1, size=(1,)).item()
 
-            if self.normalize_target:
-                target_torch, mean, std = normalize_instance(target_torch, eps=1e-11)
-                target_torch = target_torch.clamp(-6, 6)
+            processed_slices = []
+            for slice_t in slices:
+                if self.scale_target_by_kspacenorm:
+                    if "kspace_vol_norm" in attrs and attrs["kspace_vol_norm"] is not None:
+                        slice_t = slice_t * math.sqrt(float(np.prod(attrs["target_vol_shape"]).item())) / attrs["kspace_vol_norm"]
+                    elif "target_vol_norm" in attrs and attrs["target_vol_norm"] is not None:
+                        slice_t = slice_t * math.sqrt(float(np.prod(attrs["target_vol_shape"]).item())) / attrs["target_vol_norm"]
+                    else:
+                        raise ValueError("Cannot scale target by kspace norm since 'kspace_vol_norm' or 'target_vol_norm' is not present in the attrs dictionary")
+
+                if self.target_scaling_factor != 1.0:
+                    slice_t = slice_t * self.target_scaling_factor
+
+                if factor is not None:
+                    if self.target_interpolate_concat_grid:
+                        orig_size = slice_t.shape
+                        new_size = (int(orig_size[0] * factor), int(orig_size[1] * factor))
+                        theta = torch.tensor([[factor, 0, 0], [0, factor, 0]], dtype=torch.float).unsqueeze(0).to(slice_t.device)
+                        grid = torch.nn.functional.affine_grid(theta, size=(1, 1, new_size[0], new_size[1]), align_corners=False)
+                        slice_t = torch.nn.functional.grid_sample(
+                            slice_t.movedim(-1, 0).unsqueeze(0),
+                            grid,
+                            mode=self.target_interpolation_method,
+                            align_corners=False,
+                        ).squeeze(0).movedim(0, -1)
+                        slice_t = torch.cat([slice_t, grid.squeeze(0).movedim(-1, 0)], dim=0)
+                    else:
+                        if self.target_interpolation_method == "fourier":
+                            slice_t = _fourier_crop_2d(slice_t, factor)
+                        else:
+                            slice_t = torch.nn.functional.interpolate(
+                                slice_t.movedim(-1, 0).unsqueeze(0),
+                                scale_factor=factor,
+                                mode=self.target_interpolation_method,
+                            ).squeeze(0).movedim(0, -1)
+
+                if self.target_random_crop_size is not None:
+                    slice_t = TF.crop(slice_t.movedim(-1, 0).unsqueeze(0), crop_i, crop_j, self.target_random_crop_size[0], self.target_random_crop_size[1]).squeeze(0).movedim(0, -1)
+
+                if self.normalize_target:
+                    slice_t, mean, std = normalize_instance(slice_t, eps=1e-11)
+                    slice_t = slice_t.clamp(-6, 6)
+
+                processed_slices.append(slice_t)
+
+            if is_stacked:
+                target_torch = torch.stack(processed_slices, dim=0)
+            else:
+                target_torch = processed_slices[0]
 
         else:
             target_torch = torch.Tensor([0])

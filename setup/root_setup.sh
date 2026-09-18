@@ -1,0 +1,2 @@
+#!/bin/bash
+apt-get update && apt-get install -y git screen make gcc g++ libfftw3-dev liblapacke-dev libpng-dev libopenblas-dev wget nvidia-cuda-gdb libsparsehash-dev datalad git-annex netbase ca-certificates

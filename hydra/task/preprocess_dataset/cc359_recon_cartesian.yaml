@@ -1,0 +1,30 @@
+defaults:
+  - base_recon
+  - _self_
+
+input:
+  data_path_recon: null
+  data_path_sensmaps_recon: null
+
+dataset:
+  apply_fft1c_on_readout_dim: True
+  apply_fft1c_on_readout_dim_shifts: [True, True]
+  readout_dim: 0
+  readout_dim_keep_spatial: False
+  dataset_is_3d: True
+
+preprocess:
+  sampling_kind: cartesian
+  mask_type: Gaussian2D
+  mask_accelerations: 4.0
+  mask_calib: [24, 24]
+  ecalib_calib_size: null
+  mask_seed: 1234
+
+  target_type: fullysampled_rec
+  source_recons_key: null
+  source_sensmaps_key: null
+  full_sensmap_mode: bart_from_kspace
+  output_recons_key: reconstruction_mvue
+  output_sensmaps_key: sens_maps
+  volume_filter: ".*\\.h5"

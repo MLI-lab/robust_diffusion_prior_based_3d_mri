@@ -1,0 +1,11 @@
+# @package diffmodels.arch
+
+defaults:
+  - dense
+
+params:
+  channel_mult: [1, 2, 2, 2]
+  in_channels:  2
+  out_channels: 2
+  num_channels: 32
+  num_res_blocks: 4

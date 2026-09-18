@@ -1,0 +1,72 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: luesebrink
+
+conversion:
+  name: luesebrink_nifti_h5
+  task_name: luesebrink
+  mode: python
+  exists_ok: true
+  version: v1
+
+  train:
+    input_relpath: .
+    mode: python
+  test_val:
+    input_relpath: .
+    mode: python
+
+  manifest_path: null
+  json_subfolder_wildcard: sub-yv98/*/anat/*T1w.json
+  exclude_session_regex: null
+
+  global_split:
+    enabled: true
+    source: all
+    max_test_val_per_resolution: 3
+    resolutions: null
+    resolution_regex: null
+    query: null
+    exclude_query: null
+    path_regex: null
+    exclude_path_regex: null
+    exclude_session_regex: null
+
+  subset_name: diverse_v14
+  seed: 42
+  orientations: [sagittal]
+  max_train: null
+  max_test_val: null
+
+  base_train_filter:
+    exclude_resolutions: []
+    exclude_path_regex: null
+
+  subset_model: null
+
+  custom_train:
+    source: train_pool
+    resolutions: null
+    resolution_regex: null
+    query: null
+    exclude_query: null
+    path_regex: null
+    exclude_path_regex: null
+    volume_limit: 14
+    distribute_volume_limit_by_resolution: true
+    allow_short_resolution_groups: true
+    limit: null
+  custom_test_val:
+    source: test_val_pool
+    resolutions: null
+    resolution_regex: null
+    query: null
+    exclude_query: null
+    path_regex: null
+    exclude_path_regex: null
+    volume_limit: null
+    distribute_volume_limit_by_resolution: false
+    allow_short_resolution_groups: true
+    limit: null

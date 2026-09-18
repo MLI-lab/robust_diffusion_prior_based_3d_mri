@@ -63,6 +63,10 @@ class SparseConvResBlock(nn.Module):
     def get_normalising_conv(self):
         return self.block.get_normalising_conv()
 
+    def conv_kernel_size(self, img_size):
+        """Extent the wrapped block convolves with at this input resolution."""
+        return self.block.conv_kernel_size(img_size)
+
     def forward(self, x, t=None, skip=None, z=None, norm=None):
         if isinstance(x, torch.Tensor) and len(x.shape) == 4 and self.backend != "torch_dense":
             # If image shape passed in then use more efficient dense convolution
@@ -74,6 +78,10 @@ class SparseConvResBlock(nn.Module):
             return self.block(x, t=t, skip=skip, z=z, norm=norm)
 
 class SPConvResBlock(nn.Module):
+    def conv_kernel_size(self, img_size):
+        """Extent of the kernel this block convolves with."""
+        return resampled_kernel_size(self.kernel_size, img_size, self.img_size)
+
     def __init__(self, img_size, embed_dim, kernel_size=7, mult=2, skip_dim=None, time_emb_dim=None, 
                  epsilon=1e-5, z_dim=None, depthwise=True):
         super().__init__()
@@ -214,7 +222,57 @@ class SPConvResBlock(nn.Module):
 
         return x
 
+def resampled_kernel_size(kernel_size: int, img_size: int, base_img_size: int,
+                          round_down: bool = True) -> int:
+    """Kernel extent a res-block convolves with for an input of ``img_size``."""
+    if img_size == base_img_size:
+        return kernel_size
+    new_kernel_size = kernel_size * img_size / base_img_size
+    if round_down:
+        new_kernel_size = 2 * round((new_kernel_size - 1) / 2) + 1
+    else:
+        new_kernel_size = math.floor(new_kernel_size / 2) * 2 + 1
+    return max(int(new_kernel_size), 3)
+
+
+def bilinear_resize_kernel(kernel: torch.Tensor, new_size: int) -> torch.Tensor:
+    """Bilinear resample of a square conv kernel, renormalised to hold DC gain."""
+    K = kernel.shape[-1]
+    assert kernel.shape[-2] == K, f"expected a square kernel, got {tuple(kernel.shape)}"
+    if new_size == K:
+        return kernel
+    resized = F.interpolate(kernel, size=new_size, mode="bilinear")
+    return resized * (K ** 2) / (new_size ** 2)
+
+
+def spectral_resize_kernel(kernel: torch.Tensor, new_size: int) -> torch.Tensor:
+    """Band-limited resample of a square conv kernel to ``new_size`` per side."""
+    K = kernel.shape[-1]
+    assert kernel.shape[-2] == K, f"expected a square kernel, got {tuple(kernel.shape)}"
+    if new_size == K:
+        return kernel
+    assert K % 2 == 1 and new_size % 2 == 1, (
+        f"spectral_resize_kernel assumes odd sizes, got {K} -> {new_size}"
+    )
+    dims = (-2, -1)
+    centred = torch.fft.ifftshift(kernel, dim=dims)
+    spectrum = torch.fft.fftshift(torch.fft.fft2(centred, dim=dims), dim=dims)
+    n = min(K, new_size)
+    src = K // 2 - n // 2
+    dst = new_size // 2 - n // 2
+    resized = spectrum.new_zeros(*kernel.shape[:-2], new_size, new_size)
+    resized[..., dst:dst + n, dst:dst + n] = spectrum[..., src:src + n, src:src + n]
+    out = torch.fft.ifft2(torch.fft.ifftshift(resized, dim=dims), dim=dims)
+    return torch.fft.fftshift(out, dim=dims).real
+
+
 class TorchsparseResBlock(nn.Module):
+    def conv_kernel_size(self, img_size):
+        """Extent of the kernel this block convolves with -- see get_torch_kernel."""
+        if self.kernel_interpolation_method in ("zeropad", "image_zero_padding"):
+            return self.kernel_size
+        return resampled_kernel_size(self.kernel_size, img_size, self.img_size)
+
     def __init__(self, img_size, embed_dim, kernel_size=7, mult=2, skip_dim=None, time_emb_dim=None, 
                  epsilon=1e-5, z_dim=None, depthwise=True,
                  kernel_interpolation_method="spectral_zero_padding"):
@@ -267,7 +325,7 @@ class TorchsparseResBlock(nn.Module):
     
     def get_torch_kernel(self, img_size, round_down=True):
         kernel = rearrange(self.conv.kernel, "(h w) i o -> o i w h", h=self.kernel_size)
-        if img_size != self.img_size:
+        if img_size != self.img_size and self.kernel_interpolation_method != "image_zero_padding" and self.kernel_interpolation_method != "zeropad":
             ratio = img_size / self.img_size
             new_kernel_size = self.kernel_size * ratio
             if round_down:
@@ -277,24 +335,33 @@ class TorchsparseResBlock(nn.Module):
             new_kernel_size = max(new_kernel_size, 3)
 
             if self.kernel_interpolation_method == "bilinear":     
-                kernel = F.interpolate(kernel, size=new_kernel_size, mode="bilinear")
+                kernel = bilinear_resize_kernel(kernel, new_kernel_size)
             elif self.kernel_interpolation_method == "fourier":
-                dims=(-2,-1)
-                kernel_fft = torch.fft.rfft2(kernel, dim=dims)
-                kernel = torch.fft.irfft2(kernel_fft, dim=dims, s=(new_kernel_size, new_kernel_size))
-            elif self.kernel_interpolation_method != "image_zero_padding" or self.kernel_interpolation_method != "zeropad":
+                kernel = spectral_resize_kernel(kernel, new_kernel_size)
+            elif self.kernel_interpolation_method == "spectral_zero_padding":
                 pad_size = (new_kernel_size - self.kernel_size) // 2
                 rem = (new_kernel_size - self.kernel_size) % 2
                 kernel = F.pad(kernel, (pad_size, pad_size, pad_size+rem, pad_size+rem), value=0.0)
+                # assert that kernel has the correct new shape
             else:
                 raise Exception(f"Unrecognised kernel interpolation type {self.kernel_interpolation_method}.")
             assert kernel.size(-1) == new_kernel_size and kernel.size(-2) == new_kernel_size, f"Kernel size is {kernel.size()}"
 
+        #return rearrange(kernel, "(h w) i o -> o i w h", h=self.kernel_size)
         return kernel
 
     def perform_conv(self, h, height=None, width=None):
-        kernel = self.get_torch_kernel(max(height, width))
+        #if self.kernel_interpolation_method != "spectral_zero_padding":
+        #kernel = self.get_torch_kernel(height, round_down=True)
+        kernel = self.get_torch_kernel(max(height, width)) # added max
         return F.conv2d(h, kernel, padding=kernel.size(-1)//2, groups=self.groups)
+        #else:
+            ## perform fft on h
+            #kernel = rearrange(self.conv.kernel, "(h w) i o -> o i w h", h=self.kernel_size)
+            #h_fft = torch.fft.rfft2(h, dim=(-2,-1))
+            #kernel_fft = torch.fft.rfft2(kernel, dim=(-2,-1))
+            #out_fft = h_fft[:,:,:kernel_fft.shape[-2],:kernel_fft.shape[-1]] * kernel_fft
+            #return torch.fft.irfft2(out_fft, dim=(-2,-1), s=(height, width))
 
     def dense_forward(self, x, t=None, skip=None, z=None, norm=None):
         assert isinstance(x, torch.Tensor), "Dense forward expects x to be a torch Tensor"
@@ -313,10 +380,15 @@ class TorchsparseResBlock(nn.Module):
             h = self.modulate(h, t=t, z=z, norm=self.norm1, t_mlp=self.time_mlp1, z_mlp=self.z_mlp1)
         h = rearrange(h, "(b h w) c -> b c h w", b=batch_size, h=height, w=width)
         
+        # Conv and norm
+        #kernel = self.get_torch_kernel(max(height, width)) # added max
+        #h = F.conv2d(h, kernel, padding=kernel.size(-1)//2, groups=self.groups)
+
         h = self.perform_conv(h, height=height, width=width)
         h = h / norm
         x = x + h 
 
+        # elementwise MLP
         h = rearrange(x, "b c h w -> (b h w) c")
         if t is not None or z is not None:
             h = self.modulate(h, t=t, z=z, norm=self.norm2, t_mlp=self.time_mlp2, z_mlp=self.z_mlp2)
@@ -382,6 +454,10 @@ class TorchsparseResBlock(nn.Module):
         return x
 
 class TorchDenseConvResBlock(nn.Module):
+    def conv_kernel_size(self, img_size):
+        """Extent of the kernel this block convolves with."""
+        return self.kernel_size
+
     def __init__(self, img_size, embed_dim, kernel_size=7, mult=2, skip_dim=None, time_emb_dim=None, 
                  epsilon=1e-5, z_dim=None, depthwise=True):
         super().__init__()
@@ -483,6 +559,10 @@ class TorchDenseConvResBlock(nn.Module):
         return x * mask
 
 class MinkowskiConvResBlock(nn.Module):
+    def conv_kernel_size(self, img_size):
+        """Extent of the kernel this block convolves with."""
+        return self.kernel_size
+
     def __init__(self, img_size, embed_dim, kernel_size=7, mult=2, skip_dim=None, time_emb_dim=None, 
                  epsilon=1e-5, z_dim=None, depthwise=True):
         super().__init__()
@@ -794,8 +874,6 @@ def spconv_div(a, b):
     else:
         return a.replace_feature(a.features / b)
 
-def spconv_clamp(a, min=None, max=None):
-    return a.replace_feature(a.features.clamp(min=min, max=max))
 
 class MinkowskiLayerNorm(nn.Module):
     def __init__(self, num_features, eps=1e-5, elementwise_affine=True):
@@ -818,21 +896,6 @@ class MinkowskiLayerNorm(nn.Module):
                 coordinate_manager=input.coordinate_manager,
             )
 
-def minkowski_clamp(x, min=None, max=None):
-    output = x.features.clamp(min=min, max=max)
-    if isinstance(x, ME.TensorField):
-        return ME.TensorField(
-            output,
-            coordinate_field_map_key=x.coordinate_field_map_key,
-            coordinate_manager=x.coordinate_manager,
-            quantization_mode=x.quantization_mode,
-        )
-    else:
-        return ME.SparseTensor(
-            output,
-            coordinate_map_key=x.coordinate_map_key,
-            coordinate_manager=x.coordinate_manager,
-        )
 
 class ImageLayerNorm(nn.Module):
     def __init__(self, dim):

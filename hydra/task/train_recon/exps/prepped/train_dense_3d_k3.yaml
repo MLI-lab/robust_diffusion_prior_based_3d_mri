@@ -1,0 +1,8 @@
+# @package _global_
+defaults:
+  - prepped/base_training_3d
+  - /diffmodels: dense_4.1M_cached_bs1
+  - override /sample_logger: without_target
+
+dataset:
+  stack_num_slices: 3

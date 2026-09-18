@@ -20,10 +20,11 @@ class FixedGridRepresentation(CoordBasedRepresentation, nn.Module):
     ):
         super().__init__()
 
+        in_shape = tuple(int(v) for v in in_shape)
         if out_features == 1:
             rndn_shape = in_shape
         else:
-            rndn_shape = (*in_shape, out_features)
+            rndn_shape = (*in_shape, int(out_features))
 
         self.param = nn.Parameter(
             (

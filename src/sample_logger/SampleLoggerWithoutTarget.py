@@ -2,6 +2,7 @@
 from typing import Any, Dict, Tuple, Optional
 from src.representations.base_coord_based_representation import CoordBasedRepresentation
 from src.representations.mesh import SliceableMesh
+import time
 
 import wandb
 from tqdm import tqdm
@@ -16,6 +17,8 @@ from .base_sample_logger import BaseSampleLogger
 class SampleLoggerWithoutTarget(BaseSampleLogger):
 
     def __init__(self,
+            device : str,
+            devices : list[str],
             foreach_data: bool,
             final_reco: bool,
             volume_stats_period: int,
@@ -32,6 +35,14 @@ class SampleLoggerWithoutTarget(BaseSampleLogger):
         self.volume_stats__wandb_take_mean_slice_period = volume_stats__wandb_take_mean_slice_period
         self.volume_stats__wandb_video_period = volume_stats__wandb_video_period
         self.show_phase = show_phase
+        
+        # Initialize sample-dependent attributes
+        self.sample_nr = None
+        self.mesh = None
+        self.time_start = None
+        self.time: Optional[float] = None
+        self.reff: Optional[float] = None
+        self.reff_metrics: Dict[str, Any] = {}
 
 
     def init_run(self,):
@@ -40,12 +51,25 @@ class SampleLoggerWithoutTarget(BaseSampleLogger):
         """
         pass
 
-    def init_sample_log(self, sample_nr : int, mesh : SliceableMesh):
+    def init_sample_log(self, sample_nr: int, mesh: SliceableMesh, attrs: Optional[Dict[str, Any]] = None):
         """
         Called once before sample run (but can called multiple times in one run)
         """
         self.sample_nr = sample_nr
         self.mesh = mesh
+        self.time_start = time.time()
+
+        self.reff = None
+        self.reff_metrics = {}
+        reff_metrics = self._extract_effective_acceleration_metrics(attrs)
+        if reff_metrics:
+            self.reff_metrics = dict(reff_metrics)
+            if "Reff" in reff_metrics:
+                self.reff = float(reff_metrics["Reff"])
+            wandb.log({**reff_metrics, "global_step": sample_nr})
+            if wandb.run is not None:
+                for key, value in reff_metrics.items():
+                    wandb.run.summary[key] = value
 
     def __call__(self, representation: CoordBasedRepresentation, step: int, pbar : tqdm):
         """
@@ -95,7 +119,14 @@ class SampleLoggerWithoutTarget(BaseSampleLogger):
         """
         Called once after reconstruction of a sample (but can called multiple times in one run)
         """
+        self.time = time.time() - self.time_start if self.time_start is not None else None
+
         if not self.final_reco:
+            return
+        
+        # Training sample logging uses FixedGridRepresentation with mesh=None;
+        # that is valid and should log the full generated sample.
+        if self.sample_nr is None:
             return
         
         with torch.no_grad():
@@ -104,8 +135,8 @@ class SampleLoggerWithoutTarget(BaseSampleLogger):
             # generate dict of wandb images
             images = tensor_to_wandbimages_dict(
                 "reco",
-                sample.unsqueeze(0),
-                take_meanslices=False,
+                sample,
+                take_meanslices=True,
                 take_videos=True,
                 show_phase=self.show_phase,
             )
@@ -114,6 +145,7 @@ class SampleLoggerWithoutTarget(BaseSampleLogger):
                 {
                     "sample_mean": sample.detach().cpu().numpy().mean(),
                     "sample_std": sample.detach().cpu().numpy().std(),
+                    "time": self.time,
                     "global_step": self.sample_nr,
                     **(images),
                 }
@@ -124,3 +156,14 @@ class SampleLoggerWithoutTarget(BaseSampleLogger):
         Called once after the reconstruction is finished.
         """
         pass
+
+
+    def get_final_stats(self) -> Dict[str, Any]:
+        stats: Dict[str, Any] = {}
+        if self.time is not None:
+            stats["time"] = self.time
+        if self.reff_metrics:
+            stats.update(self.reff_metrics)
+        elif self.reff is not None:
+            stats["Reff"] = self.reff
+        return stats

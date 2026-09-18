@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 from torch import Tensor
 import logging
 
-from typing import Dict, Optional
+from typing import Optional
 
 from src.representations.base_coord_based_representation import CoordBasedRepresentation
 from src.representations.mesh import SliceableMesh
@@ -17,7 +17,6 @@ from src.representations.slice_methods import RandomAverageSlabsWithSliceableMes
 from src.representations.fixed_grid_representation import FixedGridRepresentation
 from src.representations.grid_sampled_representation import GridResamplingRepresentation
 from src.representations.gaussian.gaussian_representation import GaussianRepresentation
-from src.representations.inns.ffmlp_representation import FFmlpRepresentation
 
 def get_representation(
     representation_cfg: DictConfig,
@@ -37,38 +36,7 @@ def get_representation(
         logging.info("Using data mesh for rep.")
         mesh_rep = mesh_data
 
-    if representation_cfg.name == 'parametric':
-        kwargs = {
-            'in_features': representation_cfg.arch.in_features,
-            'out_features': representation_cfg.arch.out_features,
-            'num_hidden_layers': representation_cfg.arch.num_hidden_layers,
-            'normalizerelu': representation_cfg.arch.normalizerelu,
-            'first_layer_feats_scale': representation_cfg.arch.first_layer_feats_scale,
-            'final_sigma': representation_cfg.arch.final_sigma, 
-            'act_type': representation_cfg.arch.act_type, 
-            'first_layer_trainable': representation_cfg.arch.first_layer_trainable,
-            'first_layer_fmap': representation_cfg.arch.first_layer_fmap, 
-            'first_layer_init_sigma': representation_cfg.arch.first_layer_init_sigma,
-            'init_sigma': representation_cfg.arch.init_sigma,
-            'eps': representation_cfg.arch.eps
-            }
-        
-        if representation_cfg.arch.width_from_mesh:
-            #width = int(mesh_rep.matrix_size[0] / np.sqrt(2) / 2 ) * 2 # what is the reasoning here?
-            width = int( np.sqrt(np.prod(mesh_rep.matrix_size)) / np.sqrt(3) / 2 ) * 2
-        else:
-            width = representation_cfg.arch.width
-
-        image_parametrisation = FFmlpRepresentation(
-            width=width,
-            device=device,
-            **kwargs,
-            warm_start=initialise_with,
-            warm_start_mesh=mesh_data,
-            warm_start_cfg = representation_cfg.warmstart_optim
-        )
-
-    elif representation_cfg.name == 'identity':
+    if representation_cfg.name == 'identity':
         assert mesh_rep.matrix_size == mesh_data.matrix_size, "Meshes must be the same for identity representation (set use_same_mesh option)."
         image_parametrisation = FixedGridRepresentation(in_shape=mesh_rep.matrix_size,out_features=representation_cfg.arch.out_features, warm_start=initialise_with, device=device)
     elif representation_cfg.name == 'grid_sampled':

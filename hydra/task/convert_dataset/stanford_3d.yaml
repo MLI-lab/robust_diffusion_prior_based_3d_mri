@@ -1,0 +1,17 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: stanford_3d
+
+conversion:
+  name: stanford3d_fastmri_h5
+  task_name: stanford_3d
+  mode: python
+  exists_ok: true
+  train:
+    input_relpath: train
+    mode: python
+  test_val:
+    input_relpath: test_val
+    mode: python

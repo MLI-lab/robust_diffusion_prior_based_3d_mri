@@ -1,0 +1,19 @@
+defaults:
+  - base
+  - _self_
+
+dataset_name: stanford_3d
+
+raw_subfolder: stanford_3d
+
+download:
+  mode: url_csv
+  exists_ok: true
+  timeout: 120
+  num_workers: 8
+  worker_backend: mp
+  url_csv_paths:
+    train: hydra/task/download_dataset/urls/stanford_3d_train_url.csv
+    test_val: hydra/task/download_dataset/urls/stanford_3d_test_val_url.csv
+  max_files: null
+  max_files_per_fold: null

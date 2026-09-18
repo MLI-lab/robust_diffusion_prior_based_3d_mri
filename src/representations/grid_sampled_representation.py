@@ -31,6 +31,8 @@ class GridResamplingRepresentation(CoordBasedRepresentation, nn.Module):
         self.device = device
 
         in_shape = rep_mesh.matrix_size
+        self.rep_matrix_size = tuple(int(v) for v in in_shape)
+        self.has_channel_axis = out_features > 1
         if out_features == 1:
             rndn_shape = in_shape
         else:
@@ -51,22 +53,31 @@ class GridResamplingRepresentation(CoordBasedRepresentation, nn.Module):
             grid_reformed = torch.stack(
                 [grid[:, :, :, :, 2], grid[:, :, :, :, 1], grid[:, :, :, :, 0]], dim=-1
             )
-            warm_start_interp = (
+            warm_start_interp = self._drop_channel_axis(
                 torch.nn.functional.grid_sample(
-                    warm_start[None].moveaxis(-1, 1),
+                    self._add_channel_axis(warm_start),
                     grid=grid_reformed,
                     mode=self.interpolation_mode,
                     padding_mode=self.padding_mode,
                     align_corners=self.align_corners,
                 )
-                .squeeze(0)
-                .moveaxis(0, -1)
-                .contiguous()
             )
             self.param = nn.Parameter(warm_start_interp, requires_grad=True)
 
     def get_optimizer_params(self) -> Tuple:
         return self.parameters()
+
+    def _add_channel_axis(self, volume: Tensor) -> Tensor:
+        """``(Z, Y, X[, C])`` -> the ``(N, C, Z, Y, X)`` layout grid_sample wants."""
+        if self.has_channel_axis:
+            return volume[None].moveaxis(-1, 1)
+        return volume[None, None]
+
+    def _drop_channel_axis(self, volume: Tensor) -> Tensor:
+        """Inverse of :meth:`_add_channel_axis`, applied to grid_sample's output."""
+        if self.has_channel_axis:
+            return volume.squeeze(0).moveaxis(0, -1).contiguous()
+        return volume.squeeze(1).squeeze(0).contiguous()
 
     def forward(self, mesh: SliceableMesh) -> Tensor:
 
@@ -78,17 +89,14 @@ class GridResamplingRepresentation(CoordBasedRepresentation, nn.Module):
         grid_reformed = torch.stack(
             [grid[:, :, :, :, 2], grid[:, :, :, :, 1], grid[:, :, :, :, 0]], dim=-1
         )
-        return (
+        return self._drop_channel_axis(
             torch.nn.functional.grid_sample(
-                self.param[None].moveaxis(-1, 1),
+                self._add_channel_axis(self.param),
                 grid=grid_reformed,
                 mode=self.interpolation_mode,
                 padding_mode=self.padding_mode,
                 align_corners=self.align_corners,
             )
-            .squeeze(0)
-            .moveaxis(0, -1)
-            .contiguous()
         )
 
     def forward_splitted(
@@ -106,15 +114,12 @@ class GridResamplingRepresentation(CoordBasedRepresentation, nn.Module):
         grid_reformed = torch.stack(
             [grid[:, :, :, :, 2], grid[:, :, :, :, 1], grid[:, :, :, :, 0]], dim=-1
         )
-        return (
+        return self._drop_channel_axis(
             torch.nn.functional.grid_sample(
-                param.unsqueeze(0).moveaxis(-1, 1).contiguous(),
+                self._add_channel_axis(param).contiguous(),
                 grid=grid_reformed,
                 mode=self.interpolation_mode,
                 padding_mode=self.padding_mode,
                 align_corners=self.align_corners,
             )
-            .squeeze(0)
-            .moveaxis(0, -1)
-            .contiguous()
         )

@@ -1,0 +1,45 @@
+mode: train_preprocess
+
+task_name: generic_h5
+
+input:
+  data_path_train: null
+  data_path_val: null
+  data_path_sensmaps_train: null
+  data_path_sensmaps_val: null
+
+output_cache_subfolder: preprocess_cache
+
+
+preprocess:
+  version: v1
+  apply_fft1c_on_readout_dim: False
+  apply_fft1c_on_readout_dim_shifts: [True, True]
+  readout_dim: 0
+  readout_dim_keep_spatial: False
+  dataset_is_3d: True
+  
+  scale_target_by_kspacenorm: False
+  target_scaling_factor: 1.0
+  target_interpolate_by_factor: 1.0
+  target_interpolate_factor_is_interval: false
+  target_interpolate_factor_step: null
+  # target_interpolate_factor_space: factor
+  target_interpolate_factor_seed: 1234
+  target_interpolate_factor_weights: null
+  target_interpolate_factor_assignment: iid
+  target_interpolate_factor_with_replacement: null
+  target_interpolate_samples_per_volume: 1
+  target_interpolation_method: fourier
+  coil_compression_virtual_coils: null
+  recons_key: reconstruction_rss
+  output_recons_key: reconstruction_rss
+  sensmaps_key: sensitivity_maps
+  volume_filter: '.*\.h5'
+  volume_limit: null
+  num_workers: 1
+
+  visualize:
+    enabled: true
+    num_volumes: 1
+    keys: null

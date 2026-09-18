@@ -2,6 +2,7 @@ import wandb
 from torch import Tensor
 import torch
 from typing import Dict, Optional
+import math
 
 from omegaconf import DictConfig
 
@@ -15,7 +16,7 @@ def normalize_clamp(im, cl=3, cu=3):
 def tensor3d_to_wandb_video(x : Tensor, fps : Optional[int] = None, duration : Optional[float] = 5) -> wandb.Video:
 
     if fps is None:
-        fps = int(x.shape[0] // duration)
+        fps = max(math.ceil(x.shape[0] // duration),1)
 
     # assume shape (Z, X, Y, C)
     if x.ndim == 3:
@@ -74,7 +75,7 @@ def tensor_to_wandbimages_dict(basekey: str, x : Tensor, suffix_mag : str = "mag
         for i in range(batch_size):
             x_i = x[i, ...]
             if x_i.shape[-1] == 1 or x_i.shape[-1] == 3:
-                ret_dict[basekey + f"_{i}"] = wandb.Image(normalize_clamp(x).cpu().numpy())
+                ret_dict[basekey + f"_{i}"] = wandb.Image(normalize_clamp(x_i).cpu().numpy())
             elif x_i.shape[-1] == 2:
                 ret_dict[basekey + f"_{i}_{suffix_mag}"] = wandb.Image(normalize_clamp(x_i.norm(dim=-1)).cpu().numpy())
                 if show_phase:
@@ -155,3 +156,77 @@ def wandb_kwargs_via_cfg(cfg : DictConfig, use_group_name: bool = True) -> dict:
         'config' : flatten_hydra_config(cfg)
     }
     return wandb_kwargs
+
+
+from pydantic import BaseModel
+from prefect.context import get_run_context, get_settings_context
+from src.prefect.api_helper import get_flow_name_from_api
+import uuid
+
+class WandbParamsTask(BaseModel):
+    flow_name : str
+    flow_run_name : str
+    flow_run_id : uuid.UUID
+    name_aux : str = ""
+    log : bool = False
+    log_artifact: bool = False
+    project: str = ""
+    entity : str = ""
+    code_dir : str = ""
+    config : dict = {}
+
+def gather_flow_infos_for_wandb():
+    """Returns the wandb kwargs from the prefect flow context.
+    This is used to log the wandb run in the flow.
+    """
+    run_context = get_run_context()
+    assert run_context is not None, "No run context found. This function should only be called within a Prefect flow."
+    
+    flow_run = run_context.flow_run
+    return WandbParamsTask(
+        flow_name = get_flow_name_from_api(),
+        flow_run_name = flow_run.name,
+        flow_run_id = flow_run.id,
+        name_aux = ""
+    )
+
+def wandb_kwargs_for_prefect_task(params : WandbParamsTask):
+    """Returns the wandb kwargs for the prefect task.
+    This is used to log the wandb run in the task.
+    """
+
+    run_context = get_run_context()
+    assert run_context is not None, "No run context found. This function should only be called within a Prefect task."
+
+    # parameters = run_context.parameters # -> wandb config (expect tensors or large objects)
+    # start_time = run_context.start_time # -> could be added to task 
+
+    # task run has: name (Recon Task-5ba), task_key (recon_task-fa6af2dc), tags (['recon']), version (1.0), retries (0), flow run id, 
+    task_run_name = run_context.task_run.name if run_context.task_run else None
+    task_id = run_context.task_run.id if run_context.task_run else None
+    # task_key = run_context.task_run.task_key if run_context.task_run else None
+    task_tags = run_context.task_run.tags if run_context.task_run else None
+    # from src.prefect.api_helper import get_task_name_from_api
+    task_name = "-".join(task_run_name.split("-")[:-2]) #get_task_name_from_api() if run_context.task_run else None
+
+    config = params.config
+    config['flow_name'] = params.flow_name
+    config['flow_run_name'] = params.flow_run_name
+    config['flow_run_id'] = str(params.flow_run_id)
+    config['name_aux'] = params.name_aux
+    config['task_name'] = task_name
+    config['task_run_name'] = task_run_name
+    config['task_id'] = str(task_id)
+    config['task_tags'] = task_tags
+
+    return {
+        'project': params.project,
+        'entity': params.entity,
+        'mode': 'online' if params.log else 'disabled',
+        'settings': wandb.Settings(code_dir=params.code_dir),
+        'group' : f"{params.flow_run_name}",
+        'tags' : task_tags,
+        'name': f"{task_run_name}_{params.name_aux}",
+        'job_type' : task_name,
+        'config' : params.config
+    }

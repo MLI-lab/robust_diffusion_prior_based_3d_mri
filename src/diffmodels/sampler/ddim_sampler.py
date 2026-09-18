@@ -90,10 +90,14 @@ class DDIM(BaseSampler):
             cycling_skip_conditioning=cycling_skip_conditioning,
             cycling=cycling,
         )
-        self.num_steps = num_steps
-        self.eta = eta
+        self.num_steps = int(num_steps)
+        self.eta = float(eta)
 
-    def _init_timeschedule(self) -> List[Tuple[int, int]]:
+    def _init_timeschedule(self, start_timestep: Optional[int] = None) -> List[Tuple[int, int]]:
+        if start_timestep is not None:
+            timesteps = range(int(start_timestep), -2, -1)
+            return list(zip(timesteps[:-1], timesteps[1:]))
+
         assert self.sde.num_steps >= self.num_steps
         skip = self.sde.num_steps // self.num_steps
 

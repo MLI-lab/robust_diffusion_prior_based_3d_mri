@@ -1,9 +1,4 @@
-"""
-Copyright (c) Facebook, Inc. and its affiliates.
-
-This source code is licensed under the MIT license found in the
-LICENSE file in the root directory of this source tree.
-"""
+"""Copyright (c) Facebook, Inc. and its affiliates."""
 
 import logging
 import os
@@ -76,6 +71,8 @@ class ExtSliceDataset(BaseDataset):
         recons_key="reconstruction_mvue",
         readout_dim_keep_spatial: bool = False,
         sensmaps_key_in_h5: str = "sens_maps",
+        stack_num_slices: int = 1,
+        stack_padding_mode: str = "edge",
     ):
         if challenge not in ("singlecoil", "multicoil"):
             raise ValueError('challenge should be either "singlecoil" or "multicoil"')
@@ -112,6 +109,17 @@ class ExtSliceDataset(BaseDataset):
 
         self.transform = transform
         self.recons_key = recons_key
+        self.stack_num_slices = stack_num_slices
+        self.stack_padding_mode = stack_padding_mode
+
+        if self.stack_num_slices < 1:
+            raise ValueError(
+                f"stack_num_slices must be a positive integer, got {self.stack_num_slices}."
+            )
+        if self.stack_padding_mode not in ("edge",):
+            raise ValueError(
+                f"Unsupported stack_padding_mode '{self.stack_padding_mode}'. Currently supported: ['edge']."
+            )
         # self.recons_key = (
         # "reconstruction_mvue"
         ##"reconstruction_esc" if challenge == "singlecoil" else "reconstruction_rss"
@@ -249,9 +257,15 @@ class ExtSliceDataset(BaseDataset):
                 warn(f"No ISMRMRD header found in {fname}.")
                 metadata_ismrmrd = {}
 
-            kspace = hf["kspace"][()]
-            num_slices = kspace.shape[0]
-            num_coils = kspace.shape[1]
+            extra_dict = {}
+            if "kspace" in hf:
+                kspace = hf["kspace"][()]
+                num_slices = kspace.shape[0]
+                num_coils = kspace.shape[1]
+            else:
+                target_shape = hf[self.recons_key].shape
+                num_slices = target_shape[0] # shape is either (Z, 1, X, Y, C)
+                num_coils = 1  # assume singlecoil if no kspace present
 
             if self.recons_key not in hf:
                 warn(f"Reconstruction key {self.recons_key} not found in {fname}.")
@@ -259,11 +273,13 @@ class ExtSliceDataset(BaseDataset):
 
             metadata = {
                 "num_slices": num_slices,
-                "kspace_vol_norm": np.linalg.norm(kspace),
-                # "kspace_vol_std" : np.std(kspace),
-                "kspace_shape": kspace.shape,
+                "kspace_vol_norm": np.linalg.norm(kspace) if "kspace" in hf else None,
+                "kspace_shape": kspace.shape if "kspace" in hf else None,
                 "num_coils": num_coils,
+                "target_vol_norm": np.linalg.norm(hf[self.recons_key][()]),
+                "target_slice_norms": np.linalg.norm(hf[self.recons_key][()].reshape(num_slices, -1), axis=1),
                 "target_vol_shape": hf[self.recons_key].shape,
+                "target_shape": hf[self.recons_key].shape[1:],
                 **hf.attrs,
                 **metadata_ismrmrd,
             }
@@ -361,11 +377,101 @@ class ExtSliceDataset(BaseDataset):
         fname, dataslice, metadata = self.raw_samples[i]
 
         with h5py.File(fname, "r") as hf:
-            kspace = hf["kspace"][dataslice]
+            kspace = hf["kspace"][dataslice] if "kspace" in hf else None
 
             mask = np.asarray(hf["mask"]) if "mask" in hf else None
 
-            target = hf[self.recons_key][dataslice] if self.recons_key in hf else None
+            target = None
+            if self.recons_key in hf:
+                if self.stack_num_slices == 1:
+                    target = hf[self.recons_key][dataslice]
+
+                    if target.ndim == 4 and target.shape[0] == 1:
+                        target = target[0]
+
+                    if target.ndim == 2:
+                        if np.iscomplexobj(target):
+                            target = np.stack([target.real, target.imag], axis=-1)
+                        else:
+                            target = target[..., None]
+                    elif target.ndim == 3:
+                        if target.shape[-1] <= 4:
+                            pass
+                        elif target.shape[0] <= 4:
+                            target = np.moveaxis(target, 0, -1)
+                        else:
+                            raise ValueError(
+                                f"Unsupported single-slice target shape {target.shape} for file {fname}."
+                            )
+                    else:
+                        raise ValueError(
+                            f"Expected single-slice target shape (H, W), (H, W, C), or (C, H, W), got {target.shape} for file {fname}."
+                        )
+
+                    if target.ndim == 3 and np.iscomplexobj(target):
+                        if np.abs(target.imag).max() < 1e-12:
+                            target = target.real
+                        else:
+                            target = np.concatenate([target.real, target.imag], axis=-1)
+                else:
+                    target_vol = hf[self.recons_key]
+                    n_slices = target_vol.shape[0]
+                    stack_half = self.stack_num_slices // 2
+
+                    if self.stack_num_slices % 2 == 0:
+                        stack_indices = np.arange(
+                            dataslice - stack_half + 1,
+                            dataslice + stack_half + 1,
+                            dtype=np.int64,
+                        )
+                    else:
+                        stack_indices = np.arange(
+                            dataslice - stack_half,
+                            dataslice + stack_half + 1,
+                            dtype=np.int64,
+                        )
+                    if self.stack_padding_mode == "edge":
+                        stack_indices = np.clip(stack_indices, 0, n_slices - 1)
+
+                    target_stack = np.stack(
+                        [target_vol[int(stack_idx)] for stack_idx in stack_indices],
+                        axis=0,
+                    )
+
+                    if target_stack.ndim == 5 and target_stack.shape[1] == 1:
+                        target_stack = target_stack[:, 0]
+
+                    if target_stack.ndim == 3:
+                        if np.iscomplexobj(target_stack):
+                            target_stack = np.stack(
+                                [target_stack.real, target_stack.imag], axis=-1
+                            )
+                        else:
+                            target_stack = target_stack[..., None]
+                    elif target_stack.ndim == 4:
+                        if target_stack.shape[-1] <= 4:
+                            pass
+                        elif target_stack.shape[1] <= 4:
+                            target_stack = np.moveaxis(target_stack, 1, -1)
+                        else:
+                            raise ValueError(
+                                f"Unsupported stacked target shape {target_stack.shape} for file {fname}."
+                            )
+
+                    if target_stack.ndim == 4 and np.iscomplexobj(target_stack):
+                        if np.abs(target_stack.imag).max() < 1e-12:
+                            target_stack = target_stack.real
+                        else:
+                            target_stack = np.concatenate(
+                                [target_stack.real, target_stack.imag], axis=-1
+                            )
+
+                    if target_stack.ndim != 4:
+                        raise ValueError(
+                            f"Expected stacked target shape (S, H, W, C) after normalization, got {target_stack.shape} for file {fname}."
+                        )
+
+                    target = target_stack
 
             # used for a specific setup
             for po_index, po in enumerate(self.perspective_order):
@@ -374,10 +480,36 @@ class ExtSliceDataset(BaseDataset):
                     target = np.moveaxis(target, 0, 1)
 
             attrs = dict(hf.attrs)
+            attrs["sample_idx"] = i
             attrs.update(metadata)
 
-            kspace = torch.view_as_real(torch.from_numpy(kspace))
-            target = torch.from_numpy(target) if target is not None else None
+            if kspace is not None:
+                kspace = torch.view_as_real(torch.from_numpy(kspace))
+            if target is not None:
+                target = np.asarray(target)
+
+                # if target.ndim > 3:
+                    # target = np.squeeze(target)
+
+                # if target.ndim == 2:
+                    # if np.iscomplexobj(target):
+                        # target = np.stack([target.real, target.imag], axis=-1)
+                    # else:
+                        # target = target[..., None]
+                # elif target.ndim == 3:
+                    # if target.shape[-1] > 16 and target.shape[0] <= 16:
+                        # target = np.moveaxis(target, 0, -1)
+                    # if np.iscomplexobj(target):
+                        # if np.abs(target.imag).max() < 1e-12:
+                            # target = target.real
+                        # else:
+                            # target = np.concatenate([target.real, target.imag], axis=-1)
+                # else:
+                    # raise ValueError(
+                        # f"Expected final target shape (H, W, C) after normalization, got {target.shape} for file {fname}."
+                    # )
+
+                target = torch.from_numpy(target) if target is not None else None
 
         if self.return_sensmaps:
             fname_sensmap = os.path.join(

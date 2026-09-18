@@ -1,0 +1,7 @@
+defaults:
+  - dense_4.1M_cached_bs1
+
+arch:
+  params:
+    in_channels: 1
+    out_channels: 1

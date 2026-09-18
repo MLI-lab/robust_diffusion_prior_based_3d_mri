@@ -1,0 +1,7 @@
+# @package _global_
+preprocess:
+  target_interpolate_by_factor: [0.25, 1.0]
+  target_interpolate_factor_is_interval: true
+  target_interpolate_factor_step: 0.125
+  target_interpolate_factor_seed: 1234
+  target_interpolate_samples_per_volume: 1

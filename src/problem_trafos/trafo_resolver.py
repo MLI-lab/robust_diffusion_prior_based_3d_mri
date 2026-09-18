@@ -16,6 +16,13 @@ def get_fwd_trafo(name: str, **cfg_kwargs) -> BaseFwdTrafo:
 
         fwd_trafo = SubsampledFourierTrafo3D(**cfg_kwargs)
 
+    elif name in ("mri3d_noncartesian"):
+        from src.problem_trafos.fwd_trafo.mri_3d_noncartesian_trafo import (
+            NonCartesianMRI3DTrafo,
+        )
+
+        fwd_trafo = NonCartesianMRI3DTrafo(**cfg_kwargs)
+
     elif name in ("identity"):
         from src.problem_trafos.fwd_trafo.identity import IdentityTrafo
 
@@ -72,12 +79,23 @@ def get_dataset_trafo(
             provide_pseudoinverse=provide_pseudoinverse,
             **cfg_kwargs,
         )
-    elif name in ("mri3d"):
-        from src.problem_trafos.dataset_trafo.fastmri_3d_trafo import (
-            FastMRI3DDataTransform,
+    elif name in ("mri3d_noncartesian"):
+        from src.problem_trafos.dataset_trafo.fastmri_3d_noncartesian_trafo import (
+            FastMRI3DNonCartesianDataTransform,
         )
 
-        return FastMRI3DDataTransform(
+        return FastMRI3DNonCartesianDataTransform(
+            device=device,
+            provide_measurement=provide_measurement,
+            provide_pseudoinverse=provide_pseudoinverse,
+            **cfg_kwargs,
+        )
+    elif name in ("prepared_mri_recon", "prepared_mri3d_recon"):
+        from src.problem_trafos.dataset_trafo.prepared_mri_recon_trafo import (
+            PreparedMRIReconDataTransform,
+        )
+
+        return PreparedMRIReconDataTransform(
             device=device,
             provide_measurement=provide_measurement,
             provide_pseudoinverse=provide_pseudoinverse,

@@ -17,6 +17,8 @@ def decomposed_diffusion_sampling_sde_predictor(
     conj_grad_closure: callable,
     gamma: float,
     alpha: float,
+    x_var_anchor_weight: float,
+    x_var_anchor: Optional[Tensor],
     cg_kwargs: Dict,
 ) -> Tuple[Tensor, Tensor]:
 
@@ -26,6 +28,8 @@ def decomposed_diffusion_sampling_sde_predictor(
     rhs_flat = rhs.reshape(-1, 1)
 
     reg_rhs_flat = rhs_flat * gamma + alpha * initial_guess
+    if x_var_anchor is not None and x_var_anchor_weight > 0.0:
+        reg_rhs_flat = reg_rhs_flat + x_var_anchor_weight * x_var_anchor.reshape(-1, 1)
 
     res_before = (rhs_flat - conj_grad_closure(initial_guess)).square().mean()
     xhat, _ = linear_cg(
@@ -44,6 +48,32 @@ def decomposed_diffusion_sampling_sde_predictor(
         # )
 
     return xhat
+
+
+def _prepare_x_var_anchor(
+    x_reference: Tensor,
+    x_var_anchor: Optional[Tensor],
+    x_var_anchor_weight: float,
+    conditioner_name: str,
+) -> Optional[Tensor]:
+    if x_var_anchor_weight <= 0.0:
+        return None
+    if x_var_anchor is None:
+        raise ValueError(
+            f"{conditioner_name} received x_var_anchor_weight={x_var_anchor_weight}, "
+            "but x_var_anchor is None."
+        )
+
+    x_var_anchor = x_var_anchor.detach().to(
+        device=x_reference.device,
+        dtype=x_reference.dtype,
+    )
+    if tuple(x_var_anchor.shape) != tuple(x_reference.shape):
+        raise ValueError(
+            f"{conditioner_name} x_var_anchor shape {tuple(x_var_anchor.shape)} "
+            f"does not match object-space xhat shape {tuple(x_reference.shape)}."
+        )
+    return x_var_anchor
 
 
 def conj_grad_closure(
@@ -73,11 +103,19 @@ class DecomposedDiffusionSampling(ConditioningMethod):
         alpha: float = 1.0,
         cg_max_iter: int = 2,
         cg_max_tridiag_iter: int = 2,
+        x_var_anchor_weight: float = 0.0,
+        x_var_anchor: Optional[Tensor] = None,
     ):
         super().__init__(fwd_trafo, observation, sde)
         self.prior_trafo = prior_trafo
         self.gamma = gamma
         self.alpha = alpha
+        self.x_var_anchor_weight = float(x_var_anchor_weight)
+        if self.x_var_anchor_weight < 0.0:
+            raise ValueError(
+                f"dds requires x_var_anchor_weight >= 0, got {self.x_var_anchor_weight}"
+            )
+        self.x_var_anchor = x_var_anchor
         self.cg_kwargs = {
             "max_iter": cg_max_iter,
             "max_tridiag_iter": cg_max_tridiag_iter,
@@ -88,7 +126,7 @@ class DecomposedDiffusionSampling(ConditioningMethod):
             im_shape=im_shape,
             fwd_trafo=self.fwd_trafo,
             gamma=self.gamma,
-            alpha=self.alpha,
+            alpha=self.alpha + self.x_var_anchor_weight,
         )
 
     def pre_prediction_step(
@@ -98,6 +136,12 @@ class DecomposedDiffusionSampling(ConditioningMethod):
         rhs = self.fwd_trafo.trafo_adjoint(self.observation)
 
         xhat0 = self.prior_trafo.trafo_inv(xhat0)
+        x_var_anchor = _prepare_x_var_anchor(
+            x_reference=xhat0,
+            x_var_anchor=self.x_var_anchor,
+            x_var_anchor_weight=self.x_var_anchor_weight,
+            conditioner_name="dds",
+        )
 
         xhat = decomposed_diffusion_sampling_sde_predictor(
             rhs=rhs,
@@ -105,6 +149,8 @@ class DecomposedDiffusionSampling(ConditioningMethod):
             conj_grad_closure=self.conj_grad_closure_partial,
             gamma=self.gamma,
             alpha=self.alpha,
+            x_var_anchor_weight=self.x_var_anchor_weight,
+            x_var_anchor=x_var_anchor,
             cg_kwargs=self.cg_kwargs
         )
 

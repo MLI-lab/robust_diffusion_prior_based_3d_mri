@@ -37,3 +37,7 @@ class GaussianRepresentation(CoordBasedRepresentation):
 
     def get_optimizer_params(self) -> Tuple:
         return self.gaussian_model.optimizer_params
+
+    def parameters(self):
+        """Flat view of the optimised tensors."""
+        return [p for group in self.gaussian_model.optimizer_params for p in group["params"]]

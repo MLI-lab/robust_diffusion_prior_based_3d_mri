@@ -1,0 +1,203 @@
+name: tuned_recon_protocol_flow
+protocol:
+  mode: standard
+  smoke_test: false
+data:
+  source:
+    enabled: true
+    download:
+      config_path: task/download_dataset
+      config_name: cc359
+      overrides: []
+      sweep: {}
+      cache_refresh: false
+      num_gpus: 0
+    conversion:
+      shared:
+        config_path: task/convert_dataset
+        config_name: cc359
+        overrides: []
+        sweep: {}
+        cache_refresh: false
+        num_gpus: 0
+      train: null
+      recon: null
+  preprocess:
+    train:
+      config_path: task/preprocess_dataset
+      config_name: cc359_train
+      overrides:
+      - +exps=cc359/1mm
+      sweep: {}
+      cache_refresh: false
+      num_gpus: 1
+    recon:
+      config_path: task/preprocess_dataset
+      config_name: cc359_recon_cartesian_noacs
+      overrides:
+      - ++preprocess.mask_type='Poisson2D'
+      - ++preprocess.mask_seed=1234
+      sweep:
+        ++preprocess.mask_accelerations: [12.0]
+      cache_refresh: true
+      num_gpus: 1
+model:
+  train:
+    config_path: task/train_recon
+    config_name: base_train
+    overrides: []
+    sweep:
+      +exps:
+      - prepped/train_dense
+      - prepped/train_dense_3d_k5
+      - prepped/train_dense_3d_k3
+      - prepped/train_dense_3d_k7
+    cache_refresh: false
+    num_gpus: 1
+    post_overrides:
+    - ++diffmodels.train.training_steps=100000
+    - ++diffmodels.train.batch_size=1
+    - ++diffmodels.train.gradient_accumulation_steps=8
+    - ++diffmodels.val.batch_size=1
+    - ++diffmodels.val.cache_dataset_in_gpu=False
+    - ++diffmodels.train.cache_dataset_in_gpu=False
+reconstruction:
+  config_path: task/train_recon
+  config_name: base_recon
+  overrides:
+  - +exps=prepped/base_recon
+  post_overrides:
+  - ++problem_trafos.prior_trafo.scaling_factor=1.0
+  - ++problem_trafos.prior_trafo.normalize_enabled=False
+  - ++problem_trafos.fwd_trafo.sensitivitymaps_fillouter=True
+  - ++sample_logger.volume_stats__wandb_take_mean_slice_period=999999
+  - ++sample_logger.volume_stats__wandb_video_period=999999
+  - ++sample_logger.volume_stats_period=10
+  method_sweep:
+    +rec_method:
+    - varrecon_voxelrep_diffprior
+    - condsamp_tpdm_dds
+    - condsamp_diffmbir_dds
+  common_overrides:
+  - ++seed=1
+  common_post_overrides: []
+  hp_sharing:
+    assume_same:
+    - ++preprocess.mask_accelerations
+  tuning:
+    selection_config_path: task/tuning_selection
+    selection_config_name: config
+    selection_overrides:
+    - ++selection_method=best_overall
+    - ++tune_metric=rec_psnr
+    - ++tune_metric_take_max=True
+    - ++secondary_mode=none
+    hp_overrides: []
+    hp_sweep_key: sweep
+    hp_sweep_extra: {}
+    hp_log_wandb: false
+    coarse_budget_trials_per_param: 10
+    refine_budget_trials_per_param: 4
+    cache_refresh: false
+    num_gpus: 1
+    aggregate_sweep:
+      ++sample_idx: range(0,4)
+  evaluation:
+    sweep:
+      ++sample_idx: range(4,20)
+    run_overrides: []
+    cache_refresh: true
+    num_gpus: 1
+  visual_evaluation:
+    sweep:
+      ++sample_idx:
+      - 4
+    overrides_extra:
+    - ++sample_logger.save_final_sample=True
+    - ++sample_logger.save_ground_truth=True
+    cache_refresh: true
+    num_gpus: 1
+    save_result_enable: null
+reporting:
+  sweep_plot:
+    config_path: task/plot
+    config_name: seaborn_sweep_plot
+    overrides: []
+    num_gpus: 1
+    split_params:
+    - +rec_method
+  visual_plot:
+    enabled: true
+    config_path: task/plot_visual_3d
+    config_name: config
+    overrides:
+    - ++zoom_size_frac=0.20
+    - ++zoom_center_frac_h=0.5
+    - ++zoom_center_frac_w=0.5
+    - ++metric_overlay_metrics=[rec_psnr, rec_ssim]
+    num_gpus: 1
+    split_params:
+    - +rec_method
+  aggregate_plot:
+    enabled: false
+    overrides: []
+    num_gpus: null
+    name_aux: aggregate_cross_holdout
+holdout:
+  index:
+    values:
+    - 0
+    - 1
+    - 2
+    - 3
+    split_key: ++sample_idx
+  label:
+    values: []
+    split_key: recon_conversion.+exps
+smoke:
+  enabled: false
+  overrides:
+    data:
+      download_overrides:
+      - ++download.max_files_per_fold=2
+      conversion_overrides:
+      - ++conversion.version=smoke_v1
+      conversion_sweep: null
+      train_conversion_overrides: null
+      train_conversion_sweep: null
+      recon_conversion_overrides: null
+      recon_conversion_sweep: null
+      preprocess_train_overrides:
+      - ++preprocess.volume_limit=2
+      - ++preprocess.visualize.enabled=True
+      - ++preprocess.visualize.num_volumes=1
+      preprocess_recon_overrides:
+      - ++preprocess.volume_limit=2
+      - ++preprocess.visualize.enabled=True
+      - ++preprocess.visualize.num_volumes=1
+      preprocess_recon_sweep:
+        ++preprocess.mask_accelerations:
+        - 12.0
+    model:
+      train_post_overrides:
+      - ++diffmodels.train.training_steps=10
+      - ++diffmodels.train.n_log_total=2
+      - ++diffmodels.train.n_save_total=2
+      - ++diffmodels.val.n_eval_total=2
+      - ++diffmodels.val.n_sample_total=2
+      - ++diffmodels.sampler.num_steps=10
+    reconstruction:
+      post_overrides:
+      - ++reconstruction.limit_nfes=1000
+      method_sweep: null
+      aggregate_sweep: null
+      evaluation_sweep: null
+      visual_evaluation_sweep: null
+      coarse_budget_trials_per_param: 1
+      refine_budget_trials_per_param: 1
+    reporting:
+      visual_plot_enabled: null
+      aggregate_plot_enabled: null
+    holdout:
+      index_values: null
+      label_values: null

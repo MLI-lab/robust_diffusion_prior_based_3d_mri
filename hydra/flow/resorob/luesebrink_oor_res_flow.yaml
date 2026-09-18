@@ -1,0 +1,240 @@
+name: tuned_recon_protocol_flow
+protocol:
+  mode: standard
+  smoke_test: false
+data:
+  source:
+    enabled: true
+    download:
+      config_path: task/download_dataset
+      config_name: luesebrink
+      overrides: []
+      sweep: {}
+      cache_refresh: false
+      num_gpus: 0
+    conversion:
+      shared:
+        config_path: task/convert_dataset
+        config_name: luesebrink
+        overrides:
+        - ++conversion.version=v1
+        - ++conversion.global_split.max_test_val_per_resolution=4
+        sweep: {}
+        cache_refresh: false
+        num_gpus: 0
+      train:
+        config_path: task/convert_dataset
+        config_name: luesebrink
+        overrides:
+        - ++conversion.version=v1
+        - ++conversion.global_split.max_test_val_per_resolution=4
+        sweep:
+          +exps:
+          - luesebrink/res05mm
+          - luesebrink/res06mm
+          - luesebrink/res07mm
+          - luesebrink/res08mm
+          - luesebrink/res1mm
+          - luesebrink/res05_1mm
+          - luesebrink/res05_07_1mm
+          - luesebrink/diverse_v14_05_1mm
+          - luesebrink/balance_vx_fineheavy
+          - luesebrink/balance_vx_coarseheavy
+          - luesebrink/balance_vx_centerheavy
+          - luesebrink/balance_vx_bimodal
+        cache_refresh: false
+        num_gpus: 0
+      recon:
+        config_path: task/convert_dataset
+        config_name: luesebrink
+        overrides:
+        - ++conversion.version=v1
+        - ++conversion.global_split.max_test_val_per_resolution=4
+        sweep:
+          +exps:
+          - luesebrink/test_025mm
+          - luesebrink/test_045mm
+          - luesebrink/test_05mm
+          - luesebrink/test_06mm
+          - luesebrink/test_07mm
+          - luesebrink/test_08mm
+          - luesebrink/test_1mm
+        cache_refresh: false
+        num_gpus: 0
+  preprocess:
+    train:
+      config_path: task/preprocess_dataset
+      config_name: luesebrink_train
+      overrides:
+        - ++preprocess.version=v3
+      sweep: {}
+      cache_refresh: false
+      num_gpus: 1
+    recon:
+      config_path: task/preprocess_dataset
+      config_name: luesebrink_recon
+      overrides:
+        - ++preprocess.version=v4
+        - ++preprocess.mask_type='Poisson2D'
+      sweep:
+        ++preprocess.mask_accelerations:
+          - 6.0
+      cache_refresh: false
+      num_gpus: 1
+model:
+  train:
+    config_path: task/train_recon
+    config_name: base_train
+    overrides: []
+    sweep:
+      +exps:
+      - prepped/train_dense_mag
+      ++diffmodels.train.training_steps:
+      - 50000
+    cache_refresh: false
+    num_gpus: 1
+    post_overrides:
+    - ++diffmodels.train.batch_size=8
+    - ++diffmodels.val.batch_size=8
+reconstruction:
+  config_path: task/train_recon
+  config_name: base_recon
+  overrides:
+  - +exps=prepped/base_recon_rss_syn
+  post_overrides:
+  - ++reconstruction.variational.fitting.lr_scheduler.patience=30
+  - ++reconstruction.variational.fitting.optimizer.lr=4.0
+  - ++reconstruction.variational.fitting.optimizer.iterations=200
+  method_sweep:
+    +rec_method:
+    - varrecon_voxelrep_diffprior
+  common_overrides: []
+  common_post_overrides: []
+  hp_sharing:
+    assume_same:
+    - train_conversion.+exps
+    - preprocess_recon.++preprocess.mask_accelerations
+    representative:
+      train_conversion.+exps: luesebrink/diverse_v14_05_1mm
+  tuning:
+    selection_config_path: task/tuning_selection
+    selection_config_name: config
+    selection_overrides:
+    - ++selection_method=best_overall
+    - ++tune_metric=rec_psnr
+    - ++tune_metric_take_max=True
+    - ++secondary_mode=none
+    hp_overrides: []
+    hp_sweep_key: sweep
+    hp_sweep_extra: {}
+    hp_log_wandb: true
+    coarse_budget_trials_per_param: 10
+    refine_budget_trials_per_param: 0
+    cache_refresh: false
+    num_gpus: 1
+    aggregate_sweep:
+      ++sample_idx: [0]
+  evaluation:
+    sweep:
+      ++sample_idx: [0, 1, 2, 3]
+    run_overrides: []
+    cache_refresh: false
+    num_gpus: 1
+  visual_evaluation:
+    sweep:
+      ++sample_idx: [0]
+    overrides_extra:
+    - ++sample_logger.save_final_sample=True
+    - ++sample_logger.save_ground_truth=True
+    cache_refresh: false
+    num_gpus: 1
+    save_result_enable: true
+reporting:
+  sweep_plot:
+    config_path: task/plot
+    config_name: seaborn_sweep_plot
+    overrides:
+    - ++pivot_tables=[{name:luesebrink_oor_res_metrics,title:"Lüsebrink Out-of-Resolution Sweep",metrics:[rec_psnr,rec_ssim],rows:["train_conversion.+exps"],cols:["recon_conversion.+exps"],agg:[mean],include_std:false,decimals:3}]
+    num_gpus: 1
+    split_params:
+    - +rec_method
+  visual_plot:
+    enabled: true
+    config_path: task/plot_visual_3d
+    config_name: config
+    overrides:
+    - ++auto_zoom_enabled=true
+    - ++auto_zoom_grouping_key=recon_conversion.+exps
+    - ++auto_zoom_scoring_mode=disagreement_only
+    - ++auto_zoom_search_stride=2
+    - ++zoom_size_frac=0.20
+    - ++zoom_center_frac_h=0.5
+    - ++zoom_center_frac_w=0.5
+    - ++metric_overlay_metrics=[rec_psnr, rec_ssim]
+    num_gpus: 1
+    split_params:
+    - +rec_method
+  aggregate_plot:
+    enabled: false
+    overrides: []
+    num_gpus: null
+    name_aux: aggregate_cross_holdout
+smoke:
+  enabled: false
+  overrides:
+    data:
+      download_overrides: []
+      conversion_overrides:
+      - ++conversion.version=smoke_v2
+      - ++conversion.max_train=2
+      - ++conversion.max_test_val=2
+      conversion_sweep: null
+      train_conversion_overrides: null
+      train_conversion_sweep:
+        +exps:
+        - luesebrink/res1mm
+        - luesebrink/balance_vx_fineheavy
+      recon_conversion_overrides: null
+      recon_conversion_sweep:
+        +exps:
+        - luesebrink/test_025mm
+        - luesebrink/test_1mm
+      preprocess_train_overrides:
+      - ++preprocess.volume_limit=2
+      - ++preprocess.visualize.enabled=True
+      - ++preprocess.visualize.num_volumes=1
+      preprocess_recon_overrides:
+      - ++preprocess.volume_limit=2
+      - ++preprocess.visualize.enabled=True
+      - ++preprocess.visualize.num_volumes=1
+      preprocess_recon_sweep:
+        ++preprocess.mask_accelerations:
+        - 6.0
+    model:
+      train_post_overrides:
+      - ++diffmodels.train.training_steps=10
+      - ++diffmodels.train.n_log_total=2
+      - ++diffmodels.train.n_save_total=2
+      - ++diffmodels.val.n_eval_total=2
+      - ++diffmodels.val.n_sample_total=2
+      - ++diffmodels.sampler.num_steps=10
+    reconstruction:
+      post_overrides:
+      - ++reconstruction.variational.fitting.optimizer.iterations=1
+      method_sweep:
+        +rec_method:
+        - varrecon_voxelrep_noprior
+      aggregate_sweep:
+        ++sample_idx:
+        - 0
+      evaluation_sweep:
+        ++sample_idx:
+        - 0
+      visual_evaluation_sweep:
+        ++sample_idx:
+        - 0
+      coarse_budget_trials_per_param: 1
+      refine_budget_trials_per_param: 1
+    reporting:
+      visual_plot_enabled: true
+      aggregate_plot_enabled: null

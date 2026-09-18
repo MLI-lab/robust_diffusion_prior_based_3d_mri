@@ -1,0 +1,54 @@
+result_storage_path_key: storage_path
+result_storage_settings_key: storage_settings
+
+axial_slice_frac: 0.5
+coronal_slice_frac: 0.5
+sagittal_slice_frac: 0.5
+
+zoom_center_frac_h: 0.5
+zoom_center_frac_w: 0.5
+zoom_size_frac: 0.10
+zoom_display_factor: 4.0
+
+auto_zoom_enabled: false
+auto_zoom_grouping_key: null
+auto_zoom_scoring_mode: disagreement_only
+auto_zoom_search_stride: 2
+auto_zoom_fallback_to_manual: true
+
+cmap: gray
+
+metric_overlay_enabled: true
+metric_overlay_metrics:
+  - rec_psnr
+  - rec_ssim
+  - rec_ssim3d
+  - rec_ssim2d_avg
+metric_overlay_text_color: white
+metric_overlay_font_scale: 1.0
+
+shared_norm_percentile_low: 0.5
+shared_norm_percentile_high: 99.5
+
+comparison_figure_enabled: true
+gt_volume_filename_template: "ground_truth_{sample_idx}.pt"
+pseudoinverse_volume_filename_template: "filtbackproj_{sample_idx}.pt"
+
+flythrough_video_enabled: false
+flythrough_video_fps: 12
+flythrough_frame_stride: 1
+flythrough_z_start_frac: 0.0
+flythrough_z_end_frac: 1.0
+flythrough_psnr_key: rec_psnr
+flythrough_target_label: Target
+flythrough_panel_height_px: 256
+flythrough_panel_width_px: 256
+flythrough_video_dpi: 100
+flythrough_video_annotation_font_scale: 1.0
+flythrough_video_format: webm
+
+upload_magnitude_volumes_enabled: false
+upload_magnitude_volumes_artifact_name: magnitude_volumes
+upload_magnitude_volumes_dirname: magnitude_volumes
+
+dpi: 150

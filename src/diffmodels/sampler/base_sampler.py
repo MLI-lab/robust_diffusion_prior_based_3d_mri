@@ -13,7 +13,7 @@ from src.problem_trafos.fwd_trafo.base_fwd_trafo import BaseFwdTrafo
 
 from src.diffmodels.sde import SDE
 from src.diffmodels.archs.std.unet import UNetModel
-from src.reconstruction.posterior_sampling.conditioner_resolver import ConditioningMethod
+from src.diffmodels.sampler.base_conditioning_method import ConditioningMethod
 
 from src.sample_logger.base_sample_logger import BaseSampleLogger
 
@@ -50,12 +50,8 @@ class BaseSampler(ABC):
         self.cycling = cycling
 
     @abstractmethod
-    def _init_timeschedule() -> List[Tuple[int, int]]:
-        """
-            Called once at the beginning of the sampling process.
-            
-            Returns a list of time steps.
-        """
+    def _init_timeschedule(self, start_timestep: Optional[int] = None) -> List[Tuple[int, int]]:
+        """Called once at the beginning of the sampling process."""
         pass
 
     @abstractmethod
@@ -65,21 +61,46 @@ class BaseSampler(ABC):
             t: Tuple[Tensor, Tensor],
             xhat0 : Optional[Tensor],
         ) -> Tuple[Tensor, Tensor]:
-        """
-            Called at each time step to predict the next state in the (reverse) MC.
-            Given the previous state x, the current time, and the score at time xt.
-
-            Shall return the new state x, and the mean of the predicted distribution.
+        """Called at each time step to predict the next state in the (reverse) MC.
+        Given the previous state x, the current time, and the score at time xt.
         """
         pass
 
-    def sample(self) -> Tensor:
+    def _validate_warm_start(
+        self,
+        init_x: Optional[Tensor],
+        start_timestep: Optional[int],
+    ) -> Optional[int]:
+        if (init_x is None) != (start_timestep is None):
+            raise ValueError("init_x and start_timestep must either both be provided or both be None.")
+        if start_timestep is None:
+            return None
 
-        self.time_pairs = self._init_timeschedule()
+        start_timestep = int(start_timestep)
+        if start_timestep < 0 or start_timestep >= int(self.sde.num_steps):
+            raise ValueError(
+                f"start_timestep must satisfy 0 <= start_timestep < {self.sde.num_steps}, "
+                f"got {start_timestep}."
+            )
+        if tuple(init_x.shape) != tuple(self.im_shape):
+            raise ValueError(f"init_x shape {tuple(init_x.shape)} does not match im_shape {tuple(self.im_shape)}.")
+        return start_timestep
 
-        init_x = self.sde.prior_sampling(
-            self.im_shape
-        ).to(self.device)
+    def sample(
+        self,
+        init_x: Optional[Tensor] = None,
+        start_timestep: Optional[int] = None,
+    ) -> Tensor:
+
+        start_timestep = self._validate_warm_start(init_x, start_timestep)
+        self.time_pairs = self._init_timeschedule(start_timestep=start_timestep)
+
+        if init_x is None:
+            init_x = self.sde.prior_sampling(
+                self.im_shape
+            ).to(self.device)
+        else:
+            init_x = init_x.detach().to(self.device)
 
         ones_vec = torch.ones(
             (1),
@@ -93,32 +114,45 @@ class BaseSampler(ABC):
         step_cntr = 0
         mini_batch_size = self.score_mini_batch_size
 
+        if self.condition_method is not None:
+            self.condition_method.init_sampling(x)
+
         for step in pbar:
 
             t = (ones_vec * step[0], ones_vec * step[1])
 
             # cycling application
-            x_into_score = x
             skip_conditioning = False
+            if self.cycling and self.sampling_in_3d:
+                if step_cntr % 3 in (1, 2):
+                    skip_conditioning = self.cycling_skip_conditioning
+
+            needs_score_grad = (
+                self.condition_method is not None
+                and not skip_conditioning
+                and getattr(self.condition_method, "requires_score_grad", False)
+            )
+            if needs_score_grad:
+                x = x.detach().requires_grad_(True)
 
             if self.cycling and self.sampling_in_3d:
                 if step_cntr % 3 == 0:
                     x_into_score = x
                 elif step_cntr % 3 == 1:
                     x_into_score = x.swapaxes(0, 2)
-                    skip_conditioning = self.cycling_skip_conditioning
                 elif step_cntr % 3 == 2:
                     x_into_score = x.swapaxes(0, 3)
-                    skip_conditioning = self.cycling_skip_conditioning
             else:
                 x_into_score = x
 
-            if self.sampling_in_3d:
-                score_xt = torch.vstack(
-                    [self.score(x_into_score[j:j+mini_batch_size], t[0]) for j in range(0, x_into_score.shape[0], mini_batch_size)]
-                )
-            else:
-                score_xt = self.score(x_into_score, t[0])
+            score_grad_context = torch.enable_grad() if needs_score_grad else torch.no_grad()
+            with score_grad_context:
+                if self.sampling_in_3d:
+                    score_xt = torch.vstack(
+                        [self.score(x_into_score[j:j+mini_batch_size], t[0]) for j in range(0, x_into_score.shape[0], mini_batch_size)]
+                    )
+                else:
+                    score_xt = self.score(x_into_score, t[0])
 
             if x.size(1) == 1 and score_xt.size(1) == 2:
                 # this occurs when learn_sigma is enabled for the trained network

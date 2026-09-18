@@ -3,8 +3,6 @@ import torch
 import numpy as np
 import tqdm
 import torch
-from simple_knn._C import distCUDA2
-from gaussian_rasterizer_complex import ComplexGaussianRasterizer, ComplexGaussianRasterizationSettings
 import logging
 from src.reconstruction.utils.metrics import PSNR
 from functools import partial
@@ -66,8 +64,15 @@ class GaussianModel:
         self.opt_params = opt_params
         self.model_params = model_params
 
+        from simple_knn._C import distCUDA2
+        from gaussian_rasterizer_complex import ComplexGaussianRasterizer, ComplexGaussianRasterizationSettings
+
+        self._dist_cuda2 = distCUDA2
+        self._rasterizer_cls = ComplexGaussianRasterizer
+        self._raster_settings_cls = ComplexGaussianRasterizationSettings
+
     def _get_rasterizer(self, mesh_lb, mesh_ub, mesh_resolutions, voxel_offsets, warmup = False):
-        self.raster_settings = ComplexGaussianRasterizationSettings(
+        self.raster_settings = self._raster_settings_cls(
             scale_multiplier=self.opt_params.scaling_multiplier if not warmup else self.opt_params.scaling_multiplier_warmup,
             use_phase_add_as_imag=self.model_params.use_phase_add_as_imag,
             mesh_lb=mesh_lb,
@@ -77,7 +82,7 @@ class GaussianModel:
             grad_padding_factor=1.0 / mesh_resolutions.prod().item(),
             grad_padding_const=0.0
         )
-        return ComplexGaussianRasterizer(self.raster_settings)
+        return self._rasterizer_cls(self.raster_settings)
 
     def rasterize(self, mesh) -> torch.Tensor:
         return self._rasterize(
@@ -163,7 +168,7 @@ class GaussianModel:
         self._training_setup(warmup_phase=True)
 
         if warmstart_iters > 0:
-            logging.info(f"Starting warmstart phase with {warmstart_iters} iterations.")
+            logging.info(f"Starting warmstart phase with {warmstart_iters} iterations.")
 
         optimizer = torch.optim.Adam(self.optimizer_params, lr=0.0, eps=1e-15)
         psnr_threshold = self.opt_params.warmup_psnr_threshold
@@ -198,7 +203,7 @@ class GaussianModel:
         # for some reason distCUDA2 only works on GPU0
         # for small number of points distCUDA2 doesn't provide meaningful results
         if fused_point_cloud.shape[0] > 5:
-            dist2 = torch.clamp_min(distCUDA2(point_cloud_tensor.cpu().cuda()), 0.0000001).cpu().to(self.device)
+            dist2 = torch.clamp_min(self._dist_cuda2(point_cloud_tensor.cpu().cuda()), 0.0000001).cpu().to(self.device)
             scales = self.scaling_inverse_activation(self.opt_params.scaling_multiplier_init * torch.sqrt(dist2))[...,None].repeat(1, 3)
         else:
             # bit random
@@ -243,4 +248,17 @@ class GaussianModel:
             if not self.use_phase_add_as_imag:
                 l.append({'params': [self._phase], 'lr': training_args.phase_lr if not warmup_phase else training_args.phase_lr_warmup, "name": "phase"})
 
+        lr_scale = float(getattr(training_args, "lr_scale", 1.0) or 1.0)
+        if not warmup_phase and lr_scale != 1.0:
+            for group in l:
+                group["lr"] = group["lr"] * lr_scale
+            logging.info("Scaled gaussian fitting learning rates by %s.", lr_scale)
+
         self.optimizer_params = l
+
+    def scale_learning_rates(self, factor: float) -> None:
+        for group in self.optimizer_params:
+            group["lr"] = group["lr"] * float(factor)
+        if self.optimizer is not None:
+            for group in self.optimizer.param_groups:
+                group["lr"] = group["lr"] * float(factor)

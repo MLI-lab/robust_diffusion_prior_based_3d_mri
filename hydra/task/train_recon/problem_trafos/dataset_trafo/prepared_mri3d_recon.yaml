@@ -1,0 +1,10 @@
+name: prepared_mri3d_recon
+
+sampling_kind: cartesian
+which_challenge: multicoil
+multicoil_reduction_op: norm_sum_sensmaps
+return_magnitude_image: false
+return_pseudoinverse_as_observation: false
+nufft_backend: pytorch
+density_compensation: false
+upsampfac: null

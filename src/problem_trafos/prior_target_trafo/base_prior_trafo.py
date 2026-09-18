@@ -11,26 +11,12 @@ class BasePriorTrafo(ABC):
 
     @abstractmethod
     def __call__(self, x: Tensor) -> Tensor:
-        """
-        Apply the forward projection.
-
-        Parameters
-        ----------
-        x : :class:`torch.Tensor`
-            Image of attenuation.
-        """
+        """Apply the forward projection."""
         raise NotImplementedError
 
     @abstractmethod
     def trafo_inv(self, x: Tensor) -> Tensor:
-        """
-        Apply the forward projection.
-
-        Parameters
-        ----------
-        x : :class:`torch.Tensor`
-            Image of attenuation.
-        """
+        """Apply the forward projection."""
         raise NotImplementedError
 
 

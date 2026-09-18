@@ -4,18 +4,53 @@ import numpy as np
 from fastmri.data.subsample import MaskFunc
 from typing import Optional, Tuple, Union, Sequence
 
-def get_gaussian_2d_mask_rej(shape, acc_factor, seed = 0, cov_factor = 12, base_size = 320, max_retries=100):
+def _normalize_calib(calib):
+    if calib is None:
+        return None
+    if isinstance(calib, int):
+        return (calib, calib)
+    if len(calib) != 2:
+        raise ValueError(f"calib must be an int or a length-2 sequence, got {calib}.")
+    return (int(calib[0]), int(calib[1]))
+
+
+def get_gaussian_2d_mask_rej(
+        shape,
+        acc_factor,
+        seed=0,
+        cov_factor=12,
+        base_size=320,
+        max_retries=100,
+        calib=None,
+):
     # adapted from https://github.com/HJ-harry/DDS/blob/main/utils.py
     mux_in = shape[-2] * shape[-1]
-    Nsamp = mux_in // acc_factor
+    Nsamp = int(mux_in // acc_factor)
     mask = torch.zeros(shape)
     mean = [shape[-2] // 2, shape[-1] // 2]
     cov = [[shape[-2] * cov_factor * shape[-2] / base_size, 0],
          [0, shape[-1] * cov_factor * shape[-1] / base_size] ]
 
+    calib = _normalize_calib(calib)
+    if calib is not None:
+        calib_y, calib_x = calib
+        if calib_y < 0 or calib_x < 0:
+            raise ValueError(f"calib entries must be non-negative, got {calib}.")
+        calib_y = min(calib_y, shape[-2])
+        calib_x = min(calib_x, shape[-1])
+        y0 = (shape[-2] - calib_y) // 2
+        x0 = (shape[-1] - calib_x) // 2
+        mask[..., y0:y0 + calib_y, x0:x0 + calib_x] = 1
+
+    Nsamp_success = int(mask.sum().item())
+    if Nsamp_success > Nsamp:
+        raise ValueError(
+            f"calib={calib} selects {Nsamp_success} samples, which exceeds the "
+            f"requested total sample count {Nsamp} for shape={shape} and acc_factor={acc_factor}."
+        )
+
     rng = np.random.default_rng(seed)
 
-    Nsamp_success = 0
     Nsamp_it = 1
     retries = 0
 

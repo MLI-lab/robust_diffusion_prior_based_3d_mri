@@ -1,0 +1,25 @@
+palette: deep
+figsize: [8,6]
+type: line # or scatter
+dpi: 300
+
+paper_summary_table_enabled: true
+paper_summary_metrics_filter:
+  - "rec_psnr"
+  - "rec_ssim"
+  - "rec_lpips"
+
+pivot_tables: []
+
+paper_stat_table_enabled: false
+paper_stat_baseline_param: null
+paper_stat_baseline_value: null
+paper_stat_alpha: 0.05
+paper_stat_lower_is_better_metrics: []
+
+tradeoff_plots_enabled: false
+tradeoff_same_color_lines_enabled: false
+tradeoff_errorbars_enabled: false
+
+stochastic_params:
+  - "++sample_idx"
